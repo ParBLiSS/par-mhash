@@ -103,8 +103,9 @@ struct ReadHashPair{
   }
 
   void print(std::ostream& ofs){
-    for(auto i = 0; i < hash_values.size();i++)
-      ofs << hash_values[i] << " ";
+      ofs << read_id << " ";
+      for(auto i = 0; i < hash_values.size();i++)
+          ofs << hash_values[i] << " ";
   }
 
 };
@@ -259,9 +260,8 @@ void runFSO(mxx::comm& comm,
   mxx::sort(local_offsets.begin(), local_offsets.end(),
             block_compare, comm);
   for(auto x : local_offsets){
-    std::cout << x.read_id << " ";
-    x.print(std::cout);
-    std::cout << std::endl;
+     x.print(std::cout);
+     std::cout << std::endl;
   }
   std::cout << local_offsets.size() << std::endl;
 }
