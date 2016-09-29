@@ -16,6 +16,7 @@
 
 #include "mxx/env.hpp"
 #include "mxx/comm.hpp"
+#include "mxx/utils.hpp"
 #include "tclap/CmdLine.h"
 #include "utils/tclap_utils.hpp"
 
@@ -62,7 +63,7 @@ using HashBlockType = std::array<HashValueType, hash_block_size>;
 struct TestMinHashFunctionBlock {
 
   HashBlockType operator()(const KmerType& tx){
-  constexpr static const uint64_t 
+  constexpr static const uint64_t
      mod_bases[hash_functions_size] = {
         879190841,
         899809363,
@@ -106,13 +107,6 @@ struct ReadHashPair{
 struct ReadHashPairCompartor {
   bool operator()(const ReadHashPair& x,
                   const ReadHashPair& y){
-    // bool rv = true;
-    // for(auto i = 0;i < x.hash_values.size();i++) {
-    //  if(x.hash_values[i] >= y.hash_values[i])
-    //   
-    // }
-    // return rv;
-    //return (x.hash_values[0] < x.hash_values[0]);
     for(auto i = 0; i < x.hash_values.size();i++){
       if(x.hash_values[i] == y.hash_values[i]) continue;
 
@@ -248,11 +242,11 @@ void runFSO(mxx::comm& comm,
                     SeqIterType>(file_data.back(), local_offsets, comm);
 
   ReadHashPairCompartor block_compare;
-  
+
   mxx::sort(local_offsets.begin(), local_offsets.end(),
             block_compare, comm);
 
-  // std::sort(local_offsets.begin(), local_offsets.end(), 
+  // std::sort(local_offsets.begin(), local_offsets.end(),
   //          block_compare);
   // for(auto x : local_offsets){
   //   x.print(std::cout);
@@ -304,7 +298,6 @@ int main(int argc, char** argv) {
   if (comm.rank() == 0)
     std::cout << "EXECUTING " << std::string(argv[0]) << std::endl;
 
-  comm.barrier();
 
   std::vector<std::string> filenames;
   std::string outPrefix;
@@ -317,7 +310,20 @@ int main(int argc, char** argv) {
   }
 
   // runFSO
-  runFSO(comm, filenames, outPrefix);
   comm.barrier();
-  // TODO: compute elapsed time
+  auto start = std::chrono::steady_clock::now();
+
+  if(!comm.rank())
+      std::cout << "Beginning computation, timer started" << std::endl;
+
+  runFSO(comm, filenames, outPrefix);
+
+  comm.barrier();
+  auto end = std::chrono::steady_clock::now();
+  auto elapsed_time  = std::chrono::duration<double, std::milli>(end - start).count();
+
+  if(!comm.rank())
+      std::cout << "Time (ms) -> " << elapsed_time << std::endl;
+
+ // TODO: compute elapsed time
 }
