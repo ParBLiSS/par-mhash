@@ -58,37 +58,25 @@ static const std::size_t hash_block_size = HASH_BLOCK_SIZE;
 static const std::size_t hash_functions_size = HASH_BLOCK_SIZE;
 
 using HashBlockType = std::array<HashValueType, hash_block_size>;
-// typedef HashValueType HashBlockType[hash_block_size];
-
-//using HashValueType = HashBlockType;
-
-template<const std::size_t block_size>
-struct HashBlockMinimizer {
-  void operator()(const HashBlockType& x, const HashBlockType& y,
-                           HashBlockType& result){
-    for(std::size_t i = 0;i < block_size;i++) {
-      result[i] = (x[i] < y[i]) ? x[i] : y[i];
-    }
-  }
-};
 
 struct TestMinHashFunctionBlock {
-  constexpr static const uint64_t mod_bases[hash_functions_size] = {
-    879190841,
-    899809363,
-    920083987,
-    920419813
-  };
 
-  void operator()(const KmerType& tx,
-                  HashBlockType& hrx){
-    for(auto i = 0; i < hash_block_size;
-        i++ ){
-      hrx[i] = (tx.getData()[0]) % mod_bases[i];
+  HashBlockType operator()(const KmerType& tx){
+  constexpr static const uint64_t 
+     mod_bases[hash_functions_size] = {
+        879190841,
+        899809363,
+        920083987,
+        920419813
+    };
+    HashBlockType hbx;
+    // std::cout << tx.getData()[0] << " ";
+    for(auto i = 0; i < hbx.size(); i++ ){
+      hbx[i] = (tx.getData()[0]) % mod_bases[i];
+      // std::cout << hrx[i] << " ";
     }
-    //std::cout << tx.getData()[0] << " ";
-    //hrx.print(std::cout);
-    //std::cout << std::endl;
+    // std::cout << std::endl;
+    return hbx;
   }
 };
 
@@ -108,15 +96,30 @@ struct ReadHashPair{
           ofs << hash_values[i] << " ";
   }
 
+  void update_min(const HashBlockType& cx){
+    for(std::size_t i = 0;i < hash_values.size();i++) {
+      if(cx[i] < hash_values[i]) hash_values[i] = cx[i];
+    }
+  }
 };
 
 struct ReadHashPairCompartor {
   bool operator()(const ReadHashPair& x,
                   const ReadHashPair& y){
-    for(std::size_t i = 0;i < x.hash_values.size();i++) {
-      if(x.hash_values[i] >= y.hash_values[i]) return false;
+    // bool rv = true;
+    // for(auto i = 0;i < x.hash_values.size();i++) {
+    //  if(x.hash_values[i] >= y.hash_values[i])
+    //   
+    // }
+    // return rv;
+    //return (x.hash_values[0] < x.hash_values[0]);
+    for(auto i = 0; i < x.hash_values.size();i++){
+      if(x.hash_values[i] == y.hash_values[i]) continue;
+
+      if(x.hash_values[i] < y.hash_values[i]) return true;
+      else return false;
     }
-    return true;
+    return false;
   }
 };
 
@@ -191,18 +194,12 @@ struct SeqMinHashGenerator {
 
     //    printf("First: pos %lu kmer %s\n", read.id.id, bliss::utils::KmerUtils::toASCIIString(*start).c_str());Q
 
-    //*output_iter = std::make_pair(std::distance(eolstart, eolend) - KmerType::size + 1,
-    //                              (std::find(read.seq_begin, read.seq_end, 'N') == read.seq_end) ||
-    //                              (std::find(read.seq_begin, read.seq_end, 'n') == read.seq_end));
-
     bliss::partition::range<size_t> seq_range(read.seq_global_offset(),
                                               read.seq_global_offset() + read.seq_size());
-    HashBlockMinimizer<hash_block_size> find_min;
-    auto read_id = read.id.get_pos();
-    HashBlockType hrf;
+    ReadHashPair hrv;
+    hrv.read_id = read.id.get_pos();
     if (seq_range.contains(valid_range.end)) {
       // seq_range contains overlap.
-
       // not checking by end iterator at valid_range.end, since the NonEOLIter
       // is a filter iterator that may skip over that pos.
       int64_t valid_dist = valid_range.end - seq_range.start;
@@ -215,21 +212,15 @@ struct SeqMinHashGenerator {
           break;
         }
 
-        HashBlockType hrc;
-        hash_functions(*it, hrc);
-        find_min(hrf, hrc, hrf); // pick the minimum
+        HashBlockType hx = hash_functions(*it);
+        hrv.update_min(hx); // pick the minimum
       }
     } else {
       for (auto it = start; it != end; ++it)  {
-        HashBlockType hrc;
-        hash_functions(*it, hrc);
-        find_min(hrf, hrc, hrf);
+        HashBlockType hx = hash_functions(*it);
+        hrv.update_min(hx);
       }
     }
-    //*output_iter = std::make_pair(read_id, hrf);
-    ReadHashPair hrv;
-    hrv.read_id = read_id;
-    hrv.hash_values = hrf;
     *output_iter = hrv;
     return output_iter;
   }
@@ -257,13 +248,16 @@ void runFSO(mxx::comm& comm,
                     SeqIterType>(file_data.back(), local_offsets, comm);
 
   ReadHashPairCompartor block_compare;
+  
   mxx::sort(local_offsets.begin(), local_offsets.end(),
             block_compare, comm);
-  for(auto x : local_offsets){
-     x.print(std::cout);
-     std::cout << std::endl;
-  }
-  std::cout << local_offsets.size() << std::endl;
+
+  // std::sort(local_offsets.begin(), local_offsets.end(), 
+  //          block_compare);
+  // for(auto x : local_offsets){
+  //   x.print(std::cout);
+  //   std::cout << std::endl;
+  // }
 }
 
 void parse_args(int argc, char **argv,
