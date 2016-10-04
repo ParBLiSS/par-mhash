@@ -46,7 +46,7 @@ using Alphabet = bliss::common::DNA;
 template <typename Iterator, template <typename> class SeqParser>
 using SeqIterType = bliss::io::SequencesIterator<Iterator, SeqParser>;
 
-using KmerType = bliss::common::Kmer<16, Alphabet, WordType>;
+using KmerType = bliss::common::Kmer<26, Alphabet, WordType>;
 using EdgeEncoding = Alphabet;
 using FileReaderType = bliss::io::parallel::partitioned_file<bliss::io::posix_file, FileParser >;
 
@@ -65,10 +65,10 @@ struct TestMinHashFunctionBlock {
   HashBlockType operator()(const KmerType& tx){
   constexpr static const uint64_t
      mod_bases[hash_functions_size] = {
-        879190841,
-        899809363,
-        920083987,
-        920419813
+        100000000000031,
+        110000000000067,
+        120000000000067,
+        150000000000079,
     };
     HashBlockType hbx;
     // std::cout << tx.getData()[0] << " ";
