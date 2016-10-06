@@ -40,13 +40,13 @@ using Alphabet = bliss::common::DNA;
 // const std::size_t HASH_BLOCK_SIZE = 4;
 
 #ifndef HASH_KMER_SIZE
-#define HASH_KMER_SIZE 16
+#define HASH_KMER_SIZE 27
 #endif
 
 template <typename Iterator, template <typename> class SeqParser>
 using SeqIterType = bliss::io::SequencesIterator<Iterator, SeqParser>;
 
-using KmerType = bliss::common::Kmer<26, Alphabet, WordType>;
+using KmerType = bliss::common::Kmer<HASH_KMER_SIZE, Alphabet, WordType>;
 using EdgeEncoding = Alphabet;
 using FileReaderType = bliss::io::parallel::partitioned_file<bliss::io::posix_file, FileParser >;
 
@@ -59,33 +59,69 @@ static const std::size_t hash_block_size = HASH_BLOCK_SIZE;
 static const std::size_t hash_functions_size = HASH_BLOCK_SIZE;
 
 using HashBlockType = std::array<HashValueType, hash_block_size>;
+//#include <smhasher/MurmurHash3.cpp>
+/**
+ * @brief Kmer specialization for MurmurHash.  generated hash is 128 bit.
+ */
+template <typename KMER, bool Prefix = false>
+class murmur {
 
-struct TestMinHashFunctionBlock {
+protected:
+    static constexpr unsigned int nBytes = (KMER::nBits + 7) / 8;
 
-  HashBlockType operator()(const KmerType& tx){
-  constexpr static const uint64_t
-     mod_bases[hash_functions_size] = {
-        100000000000031,
-        110000000000067,
-        120000000000067,
-        150000000000079,
-    };
-    HashBlockType hbx;
-    // std::cout << tx.getData()[0] << " ";
-    for(auto i = 0; i < hbx.size(); i++ ){
-      hbx[i] = (tx.getData()[0]) % mod_bases[i];
-      // std::cout << hrx[i] << " ";
-    }
-    // std::cout << std::endl;
-    return hbx;
+public:
+    inline uint64_t operator()(const KMER & kmer, uint32_t seed_value = 42) const {
+            // produces 128 bit hash.
+            uint64_t h[2];
+            // let compiler optimize out all except one of these.
+            if (sizeof(void*) == 8)
+                MurmurHash3_x64_128(kmer.getData(), nBytes, seed_value, h);
+            else if (sizeof(void*) == 4)
+                MurmurHash3_x86_128(kmer.getData(), nBytes, seed_value, h);
+            else
+                throw ::std::logic_error("ERROR: neither 32 bit nor 64 bit system");
+
+            // use the upper 64 bits.
+            if (Prefix)
+                return h[1];
+            else
+                return h[0];
+        }
+};
+
+template<typename KMER, std::size_t seed_begin = 0>
+struct MinHashFunctionBlock {
+
+  HashBlockType operator()(const KMER& tx){
+      constexpr static const uint32_t
+        seed_values[hash_functions_size] = {
+          1000000007,
+          1000002043,
+          1000003097,
+          1000000079,
+      };
+
+      constexpr static const murmur<KMER> mmur_obj;
+
+      HashBlockType hbx;
+      // std::cout << tx.getData()[0] << " ";
+      auto sdx = seed_begin;
+      for(auto i = 0; (i < hbx.size()) && (sdx < hash_functions_size);
+          i++, sdx++){
+          // hbx[i] = (tx.getData()[0]) % mod_bases[i];
+          // std::cout << hrx[i] << " ";
+          hbx[i] = mmur_obj(tx, seed_values[sdx]);
+      }
+      // std::cout << std::endl;
+      return hbx;
   }
 };
 
-struct ReadHashPair{
+struct ReadHashBlock{
   std::size_t read_id;
   HashBlockType hash_values;
 
-  ReadHashPair() {
+  ReadHashBlock() {
     // hash_values.resize(block_size);
     for(auto i = 0; i < hash_values.size();i++)
       hash_values[i] = std::numeric_limits<HashValueType>::max() - 1;
@@ -104,9 +140,9 @@ struct ReadHashPair{
   }
 };
 
-struct ReadHashPairCompartor {
-  bool operator()(const ReadHashPair& x,
-                  const ReadHashPair& y){
+struct ReadHashBlockComparator {
+  bool operator()(const ReadHashBlock& x,
+                  const ReadHashBlock& y){
     for(auto i = 0; i < x.hash_values.size();i++){
       if(x.hash_values[i] == y.hash_values[i]) continue;
 
@@ -119,7 +155,7 @@ struct ReadHashPairCompartor {
 
 
 // defining your own type for structs which are non-templated 
-MXX_CUSTOM_STRUCT(ReadHashPair, read_id, hash_values);
+MXX_CUSTOM_STRUCT(ReadHashBlock, read_id, hash_values);
 
 /**
  * @tparam KmerType output value type of this parser. not necessarily the same
@@ -132,7 +168,7 @@ struct SeqMinHashGenerator {
   // parameterized, this is not hard coded. first (size_t) is length of the
   // read. second (bool) is true if read is valid, ie no N in the read.
   // using value_type = std::pair<std::size_t, HashBlockType>;
-  using value_type = ReadHashPair;
+  using value_type = ReadHashBlock;
   using kmer_type = KmerType;
   static constexpr size_t window_size = kmer_type::size;
 
@@ -197,7 +233,7 @@ struct SeqMinHashGenerator {
 
     bliss::partition::range<size_t> seq_range(
         read.seq_global_offset(), read.seq_global_offset() + read.seq_size());
-    ReadHashPair hrv;
+    ReadHashBlock hrv;
     hrv.read_id = read.id.get_pos();
     if (seq_range.contains(valid_range.end)) {
       // seq_range contains overlap.
@@ -248,16 +284,18 @@ void runFSO(mxx::comm& comm,
   BL_BENCH_COLLECTIVE_END(rfso, "read_files", total, comm);
 
   BL_BENCH_START(rfso);
-  std::vector< SeqMinHashGenerator< TestMinHashFunctionBlock, KmerType>::value_type >  local_offsets;
+  using SeqMinHashGeneratorType =
+      SeqMinHashGenerator< MinHashFunctionBlock<KmerType>, KmerType>;
+  std::vector< SeqMinHashGeneratorType::value_type >  local_offsets;
 
   bliss::io::KmerFileHelper::template
-    parse_file_data<SeqMinHashGenerator<TestMinHashFunctionBlock, KmerType>, FileParser,
-                    SeqIterType>(file_data.back(), local_offsets, comm);
+      parse_file_data<SeqMinHashGeneratorType, FileParser,
+                      SeqIterType>(file_data.back(), local_offsets, comm);
 
   BL_BENCH_COLLECTIVE_END(rfso, "compute_hash", local_offsets.size(), comm);
 
   BL_BENCH_START(rfso);
-  ReadHashPairCompartor block_compare;
+  ReadHashBlockComparator block_compare;
 
   mxx::sort(local_offsets.begin(), local_offsets.end(),
             block_compare, comm);
