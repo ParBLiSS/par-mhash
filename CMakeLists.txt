@@ -35,6 +35,14 @@ else (MPI_FOUND)
   message(SEND_ERROR "This application cannot compile without MPI")
 endif (MPI_FOUND)
 
+OPTION(ENABLE_BENCHMARKING "Enable benchmarking." ON)
+# set here since timer needs to have this defined allways.
+if (ENABLE_BENCHMARKING)
+  SET(BL_BENCHMARK 1)
+else(ENABLE_BENCHMARKING)
+  SET(BL_BENCHMARK 0)
+endif(ENABLE_BENCHMARKING)
+
 ###### Executable and Libraries
 # Save libs and executables in the same place
 set(LIBRARY_OUTPUT_PATH ${PROJECT_BINARY_DIR}/lib CACHE PATH "Output directory for libraries" )
@@ -53,6 +61,7 @@ include_directories("${PROJECT_SOURCE_DIR}/ext/bliss/ext/mxx/include")
 include_directories("${PROJECT_SOURCE_DIR}/ext/bliss/ext/mxx/ext")
 include_directories("${PROJECT_SOURCE_DIR}/ext/bliss/ext/tclap-1.2.1/include")
 include_directories("${PROJECT_SOURCE_DIR}/ext/bliss/ext/Nadeau")
+include_directories("${PROJECT_SOURCE_DIR}/ext/bliss/ext/sparsehash/src")
 
 #include our build directory for bliss config files
 include_directories("${CMAKE_BINARY_DIR}")

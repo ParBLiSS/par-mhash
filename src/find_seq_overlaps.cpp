@@ -98,7 +98,7 @@ struct ReadHashPair{
   }
 
   void update_min(const HashBlockType& cx){
-    for(std::size_t i = 0;i < hash_values.size();i++) {
+    for(auto i = 0;i < hash_values.size();i++) {
       if(cx[i] < hash_values[i]) hash_values[i] = cx[i];
     }
   }
@@ -134,6 +134,7 @@ struct SeqMinHashGenerator {
   // using value_type = std::pair<std::size_t, HashBlockType>;
   using value_type = ReadHashPair;
   using kmer_type = KmerType;
+  static constexpr size_t window_size = kmer_type::size;
 
   bliss::partition::range<std::size_t> valid_range;
 
@@ -154,9 +155,9 @@ struct SeqMinHashGenerator {
   OutputIt operator()(SeqType & read, OutputIt output_iter) {
     MinHashFunctionBlockType hash_functions;
 
-    static_assert(std::is_same<SeqType,
+    static_assert(std::is_same< SeqType,
                   bliss::io::FASTQSequence<typename SeqType::IteratorType> >::value,
-                  "ReadLengthParser only supports FASTQ at the moment, as it does not handle partial sequence.");
+                  "ReadLengthParser only supports FASTQ at the moment.");
 
     static_assert(std::is_same<value_type,
                   typename std::iterator_traits<OutputIt>::value_type>::value,
@@ -165,12 +166,14 @@ struct SeqMinHashGenerator {
     using Alphabet = typename KmerType::KmerAlphabet;
 
     /// converter from ascii to alphabet values
-    using BaseCharIterator = bliss::iterator::transform_iterator<
-      NonEOLIter<typename SeqType::IteratorType>, bliss::common::ASCII2<Alphabet> >;
+    using BaseCharIterator =
+        bliss::iterator::transform_iterator< NonEOLIter<typename SeqType::IteratorType>,
+                                             bliss::common::ASCII2<Alphabet> >;
 
     /// kmer generation iterator
-    using KmerIterType = bliss::common::KmerGenerationIterator<BaseCharIterator,
-                                                               KmerType>;
+    using KmerIterType =
+        bliss::common::KmerGenerationIterator<BaseCharIterator,
+                                              KmerType>;
 
     static_assert(std::is_same<typename std::iterator_traits<KmerIterType>::value_type,
                                KmerType>::value,
@@ -179,17 +182,21 @@ struct SeqMinHashGenerator {
 
     //== filtering iterator
     bliss::utils::file::NotEOL neol;
-    NonEOLIter<typename SeqType::IteratorType> eolstart(neol, read.seq_begin, read.seq_end);
+    NonEOLIter<typename SeqType::IteratorType> eolstart(neol, read.seq_begin,
+                                                        read.seq_end);
     NonEOLIter<typename SeqType::IteratorType> eolend(neol, read.seq_end);
 
     //== set up the kmer generating iterators
-    KmerIterType start(BaseCharIterator(eolstart, bliss::common::ASCII2<Alphabet>()), true);
-    KmerIterType end(BaseCharIterator(eolend, bliss::common::ASCII2<Alphabet>()), false);
+    KmerIterType start(BaseCharIterator(eolstart, bliss::common::ASCII2<Alphabet>()),
+                       true);
+    KmerIterType end(BaseCharIterator(eolend, bliss::common::ASCII2<Alphabet>()),
+                     false);
 
-    //    printf("First: pos %lu kmer %s\n", read.id.id, bliss::utils::KmerUtils::toASCIIString(*start).c_str());Q
+    // printf("First: pos %lu kmer %s\n", read.id.id,
+    //       bliss::utils::KmerUtils::toASCIIString(*start).c_str());
 
-    bliss::partition::range<size_t> seq_range(read.seq_global_offset(),
-                                              read.seq_global_offset() + read.seq_size());
+    bliss::partition::range<size_t> seq_range(
+        read.seq_global_offset(), read.seq_global_offset() + read.seq_size());
     ReadHashPair hrv;
     hrv.read_id = read.id.get_pos();
     if (seq_range.contains(valid_range.end)) {
@@ -225,8 +232,11 @@ struct SeqMinHashGenerator {
 void runFSO(mxx::comm& comm,
             std::vector<std::string>& inFiles, std::string outPrefix){
   // Read files
+  BL_BENCH_INIT(rfso);
   std::vector<::bliss::io::file_data> file_data;
   size_t total = 0;
+
+  BL_BENCH_START(rfso);
   for (auto fn : inFiles) {
     if (comm.rank() == 0) printf("READING %s via posix\n", fn.c_str());
 
@@ -235,16 +245,23 @@ void runFSO(mxx::comm& comm,
     file_data.push_back(fobj.read_file());
     total += file_data.back().getRange().size();
   }
+  BL_BENCH_COLLECTIVE_END(rfso, "read_files", total, comm);
+
+  BL_BENCH_START(rfso);
   std::vector< SeqMinHashGenerator< TestMinHashFunctionBlock, KmerType>::value_type >  local_offsets;
 
   bliss::io::KmerFileHelper::template
     parse_file_data<SeqMinHashGenerator<TestMinHashFunctionBlock, KmerType>, FileParser,
                     SeqIterType>(file_data.back(), local_offsets, comm);
 
+  BL_BENCH_COLLECTIVE_END(rfso, "compute_hash", local_offsets.size(), comm);
+
+  BL_BENCH_START(rfso);
   ReadHashPairCompartor block_compare;
 
   mxx::sort(local_offsets.begin(), local_offsets.end(),
             block_compare, comm);
+  BL_BENCH_COLLECTIVE_END(rfso, "sort_records", local_offsets.size(), comm);
 
   // std::sort(local_offsets.begin(), local_offsets.end(),
   //          block_compare);
@@ -252,6 +269,7 @@ void runFSO(mxx::comm& comm,
   //   x.print(std::cout);
   //   std::cout << std::endl;
   // }
+  BL_BENCH_REPORT_MPI_NAMED(rfso, "app", comm);
 }
 
 void parse_args(int argc, char **argv,
@@ -311,19 +329,20 @@ int main(int argc, char** argv) {
 
   // runFSO
   comm.barrier();
-  auto start = std::chrono::steady_clock::now();
+  // auto start = std::chrono::steady_clock::now();
 
-  if(!comm.rank())
-      std::cout << "Beginning computation, timer started" << std::endl;
+  // if(!comm.rank())
+  //    std::cout << "Beginning computation, timer started" << std::endl;
 
   runFSO(comm, filenames, outPrefix);
 
-  comm.barrier();
-  auto end = std::chrono::steady_clock::now();
-  auto elapsed_time  = std::chrono::duration<double, std::milli>(end - start).count();
 
-  if(!comm.rank())
-      std::cout << "Time (ms) -> " << elapsed_time << std::endl;
+  comm.barrier();
+  // auto end = std::chrono::steady_clock::now();
+  // auto elapsed_time  = std::chrono::duration<double, std::milli>(end - start).count();
+
+  // if(!comm.rank())
+  //    std::cout << "Time (ms) -> " << elapsed_time << std::endl;
 
  // TODO: compute elapsed time
 }
