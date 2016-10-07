@@ -121,23 +121,26 @@ struct ReadHashBlock{
   std::size_t read_id;
   HashBlockType hash_values;
 
-  ReadHashBlock() {
-    // hash_values.resize(block_size);
-    for(auto i = 0; i < hash_values.size();i++)
-      hash_values[i] = std::numeric_limits<HashValueType>::max() - 1;
-  }
-
-  void print(std::ostream& ofs){
-      ofs << read_id << " ";
-      for(auto i = 0; i < hash_values.size();i++)
-          ofs << hash_values[i] << " ";
-  }
-
-  void update_min(const HashBlockType& cx){
-    for(auto i = 0;i < hash_values.size();i++) {
-      if(cx[i] < hash_values[i]) hash_values[i] = cx[i];
+    void reset(){
+        for(auto i = 0; i < hash_values.size();i++)
+            hash_values[i] = std::numeric_limits<HashValueType>::max() - 1;
     }
-  }
+
+    ReadHashBlock() {
+        reset();
+    }
+
+    void print(std::ostream& ofs){
+        ofs << read_id << " ";
+        for(auto i = 0; i < hash_values.size();i++)
+            ofs << hash_values[i] << " ";
+    }
+
+    void update_min(const HashBlockType& cx){
+        for(auto i = 0;i < hash_values.size();i++) {
+            if(cx[i] < hash_values[i]) hash_values[i] = cx[i];
+        }
+    }
 };
 
 struct ReadHashBlockComparator {
@@ -286,27 +289,39 @@ void runFSO(mxx::comm& comm,
   BL_BENCH_START(rfso);
   using SeqMinHashGeneratorType =
       SeqMinHashGenerator< MinHashFunctionBlock<KmerType>, KmerType>;
-  std::vector< SeqMinHashGeneratorType::value_type >  local_offsets;
+  std::vector< SeqMinHashGeneratorType::value_type >  local_rhpairs;
 
   bliss::io::KmerFileHelper::template
       parse_file_data<SeqMinHashGeneratorType, FileParser,
-                      SeqIterType>(file_data.back(), local_offsets, comm);
+                      SeqIterType>(file_data.back(), local_rhpairs, comm);
 
-  BL_BENCH_COLLECTIVE_END(rfso, "compute_hash", local_offsets.size(), comm);
+  BL_BENCH_COLLECTIVE_END(rfso, "compute_hash", local_rhpairs.size(), comm);
 
   BL_BENCH_START(rfso);
   ReadHashBlockComparator block_compare;
 
-  mxx::sort(local_offsets.begin(), local_offsets.end(),
+  mxx::sort(local_rhpairs.begin(), local_rhpairs.end(),
             block_compare, comm);
-  BL_BENCH_COLLECTIVE_END(rfso, "sort_records", local_offsets.size(), comm);
+  BL_BENCH_COLLECTIVE_END(rfso, "sort_records", local_rhpairs.size(), comm);
 
-  // std::sort(local_offsets.begin(), local_offsets.end(),
+  // std::sort(local_rhpairs.begin(), local_rhpairs.end(),
   //          block_compare);
-  // for(auto x : local_offsets){
+  // for(auto x : local_rhpairs){
   //   x.print(std::cout);
   //   std::cout << std::endl;
   // }
+
+  BL_BENCH_START(rfso);
+  uint64_t nuniqb = 0;
+  auto prevx = mxx::right_shift(local_rhpairs.front(), comm);
+  if(comm.rank() == 0)
+      prevx.reset();
+  for(auto curx : local_rhpairs){
+      if(prevx.hash_values == curx.hash_values)
+          nuniqb += 1;
+      prevx = curx;
+  }
+  BL_BENCH_COLLECTIVE_END(rfso, "uniq_blocks", nuniqb, comm);
   BL_BENCH_REPORT_MPI_NAMED(rfso, "app", comm);
 }
 
