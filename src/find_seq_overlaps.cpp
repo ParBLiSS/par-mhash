@@ -266,6 +266,92 @@ struct SeqMinHashGenerator {
   }
 };
 
+using SeqMinHashGeneratorType =
+    SeqMinHashGenerator< MinHashFunctionBlock<KmerType>, KmerType>;
+using BlockValueType = SeqMinHashGeneratorType::value_type ;
+
+void shiftStraddlingRegion(const mxx::comm& comm,
+                           std::vector<BlockValueType>&  local_rhpairs,
+                           std::size_t& start_offset,
+                           std::size_t& end_offset,
+                           std::vector<BlockValueType>& straddle_region){
+    std::vector<BlockValueType> to_left, region_right, region_left;
+    // find the starting segment of local_rhpairs that straddles
+    //  with the processor on the left
+    auto lastv = local_rhpairs.back();
+    auto prevx = mxx::right_shift(lastv, comm);
+
+    auto fwx_itr = local_rhpairs.begin();
+    if(comm.rank() > 0){
+        for(;fwx_itr != local_rhpairs.end(); fwx_itr++){
+            if((*fwx_itr).hash_values != prevx.hash_values)
+                break;
+        }
+    }
+
+    if(fwx_itr != local_rhpairs.begin()){
+        auto osize = std::distance(local_rhpairs.begin(), fwx_itr);
+        to_left.resize(osize);
+        std::copy(local_rhpairs.begin(), fwx_itr, to_left.begin());
+    }
+    region_right = mxx::left_shift(to_left, comm); // TODO: make sub-communicator
+    start_offset = std::distance(local_rhpairs.begin(), fwx_itr);
+
+    // find the ending segment of local_rhpairs that straddles
+    //  with the processor on the right
+    auto rvx_itr = local_rhpairs.rbegin();
+    if(comm.rank() < comm.size() - 1) {
+        for(;rvx_itr != local_rhpairs.rend();rvx_itr++){
+            if((*rvx_itr).hash_values != lastv.hash_values)
+                break;
+        }
+    }
+    auto rsize = std::distance(local_rhpairs.rbegin(), rvx_itr);
+    if(rsize < local_rhpairs.size()) // TODO: check this
+        end_offset = local_rhpairs.size() - rsize + 1;
+
+    // TODO: validate/check this again
+    straddle_region.resize(local_rhpairs.size()  - end_offset + region_right.size());
+    std::copy(local_rhpairs.begin() + end_offset, local_rhpairs.end(),
+              straddle_region.begin());
+    std::copy(region_right.begin(), region_right.end(),
+              straddle_region.begin() + rsize);
+
+}
+
+void generatePairs(const mxx::comm& comm,
+                   std::vector<BlockValueType>::iterator start_itr,
+                   std::vector<BlockValueType>::iterator end_itr){
+    for(auto outer_itr = start_itr; outer_itr != end_itr; outer_itr++){
+        for(auto inner_itr = outer_itr; inner_itr != end_itr; inner_itr++){
+            // TODO: generate pair
+        }
+    }
+}
+
+uint64_t generateOverlapReadPairs(const mxx::comm& comm,
+                                  std::vector<BlockValueType>&  local_rhpairs){
+    uint64_t nuniqb = 0;
+    auto lastv = local_rhpairs.back();
+    auto prevx = mxx::right_shift(lastv, comm);
+    for(auto curx : local_rhpairs){
+        if(prevx.hash_values != curx.hash_values)
+            nuniqb += 1;
+        prevx = curx;
+    }
+
+    std::size_t start_offset, end_offset;
+    std::vector<BlockValueType> straddle_region;
+    //
+    shiftStraddlingRegion(comm, local_rhpairs, start_offset, end_offset,
+                          straddle_region);
+
+    //
+    generatePairs(comm, straddle_region.begin(), straddle_region.end());
+    generatePairs(comm, local_rhpairs.begin() + start_offset,
+                  local_rhpairs.end() + end_offset);
+    return nuniqb;
+}
 
 
 void runFSO(mxx::comm& comm,
@@ -287,8 +373,6 @@ void runFSO(mxx::comm& comm,
   BL_BENCH_COLLECTIVE_END(rfso, "read_files", total, comm);
 
   BL_BENCH_START(rfso);
-  using SeqMinHashGeneratorType =
-      SeqMinHashGenerator< MinHashFunctionBlock<KmerType>, KmerType>;
   std::vector< SeqMinHashGeneratorType::value_type >  local_rhpairs;
 
   bliss::io::KmerFileHelper::template
@@ -313,15 +397,11 @@ void runFSO(mxx::comm& comm,
 
   BL_BENCH_START(rfso);
   uint64_t nuniqb = 0;
-  auto prevx = mxx::right_shift(local_rhpairs.front(), comm);
-  if(comm.rank() == 0)
-      prevx.reset();
-  for(auto curx : local_rhpairs){
-      if(prevx.hash_values == curx.hash_values)
-          nuniqb += 1;
-      prevx = curx;
-  }
-  BL_BENCH_COLLECTIVE_END(rfso, "uniq_blocks", nuniqb, comm);
+  comm.with_subset(
+      local_rhpairs.begin() != local_rhpairs.end(), [&](const mxx::comm& comm){
+          nuniqb = generateOverlapReadPairs(comm, local_rhpairs);
+      });
+  BL_BENCH_COLLECTIVE_END(rfso, "pair_gen", nuniqb, comm);
   BL_BENCH_REPORT_MPI_NAMED(rfso, "app", comm);
 }
 
