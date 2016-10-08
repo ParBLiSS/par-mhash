@@ -276,7 +276,7 @@ void shiftStraddlingRegion(const mxx::comm& comm,
                            std::size_t& end_offset,
                            std::vector<BlockValueType>& straddle_region){
     // Assumes that the local_rhpairs has at least one element
-    std::vector<BlockValueType> to_left, right_region;
+    std::vector<BlockValueType> snd_to_left, right_region;
     // find the starting segment of local_rhpairs that straddles
     //  with the processor on the left
     auto lastv = local_rhpairs.back();
@@ -292,10 +292,10 @@ void shiftStraddlingRegion(const mxx::comm& comm,
 
     if(fwx_itr != local_rhpairs.begin()){
         auto osize = std::distance(local_rhpairs.begin(), fwx_itr);
-        to_left.resize(osize);
-        std::copy(local_rhpairs.begin(), fwx_itr, to_left.begin());
+        snd_to_left.resize(osize);
+        std::copy(local_rhpairs.begin(), fwx_itr, snd_to_left.begin());
     }
-    right_region = mxx::left_shift(to_left, comm); // TODO: make sub-communicator
+    right_region = mxx::left_shift(snd_to_left, comm); // TODO: make sub-communicator ?
     start_offset = std::distance(local_rhpairs.begin(), fwx_itr);
 
     // find the ending segment of local_rhpairs that straddles
@@ -311,7 +311,7 @@ void shiftStraddlingRegion(const mxx::comm& comm,
     auto left_region_size = std::distance(local_rhpairs.rbegin(), rvx_itr);
     end_offset = local_rhpairs.size() - left_region_size;
 
-    // straddling region
+    // construct straddling region from left and right region
     straddle_region.resize(left_region_size + right_region.size());
     std::copy(local_rhpairs.begin() + end_offset, local_rhpairs.end(),
               straddle_region.begin());
@@ -320,23 +320,25 @@ void shiftStraddlingRegion(const mxx::comm& comm,
 
 }
 
+template<typename ReadIdType=uint64_t>
 void generatePairs(const mxx::comm& comm,
                    std::vector<BlockValueType>::iterator start_itr,
                    std::vector<BlockValueType>::iterator end_itr,
-                   std::vector<std::pair<uint64_t, uint64_t>>& read_pairs){
+                   std::vector<std::pair<ReadIdType, ReadIdType>>& read_pairs){
     for(auto outer_itr = start_itr; outer_itr != end_itr; outer_itr++){
         for(auto inner_itr = outer_itr; inner_itr != end_itr; inner_itr++){
-            // TODO: generate pair
+            // generate pair
             read_pairs.push_back(std::make_pair(outer_itr->read_id,
                                                 inner_itr->read_id));
         }
     }
 }
 
+template<typename ReadIdType=uint64_t>
 uint64_t generateOverlapReadPairs(const mxx::comm& comm,
-                                  std::vector<BlockValueType>&  local_rhpairs){
+                                  std::vector<BlockValueType>&  local_rhpairs,
+                                  std::vector< std::pair<ReadIdType, ReadIdType> >& read_pairs){
     uint64_t nuniqb = 0;
-    std::vector<std::pair<uint64_t, uint64_t>> read_pairs;
     auto lastv = local_rhpairs.back();
     auto prevx = mxx::right_shift(lastv, comm);
     for(auto curx : local_rhpairs){
@@ -347,15 +349,15 @@ uint64_t generateOverlapReadPairs(const mxx::comm& comm,
 
     std::size_t start_offset, end_offset;
     std::vector<BlockValueType> straddle_region;
-    //
+    // shift straddling
     shiftStraddlingRegion(comm, local_rhpairs, start_offset, end_offset,
                           straddle_region);
 
-    //
+    // generate pairs
     generatePairs(comm, straddle_region.begin(), straddle_region.end(),
                   read_pairs);
     auto rbv_itr = local_rhpairs.begin() + start_offset;
-    auto prev_rbv = rhp_itrx;
+    auto prev_rbv = rbv_itr;
     for(rbv_itr++; rbv_itr != local_rhpairs.begin() + end_offset;
         rbv_itr++){
         if((*rbv_itr).hash_values == (*prev_rbv).hash_values)
@@ -365,10 +367,32 @@ uint64_t generateOverlapReadPairs(const mxx::comm& comm,
     }
     if(rbv_itr == local_rhpairs.begin() + end_offset && prev_rbv != rbv_itr)
         generatePairs(comm, prev_rbv, rbv_itr, read_pairs);
-    // sort read pairs
-    mxx::sort(comm, read_pairs.begin(), read_pairs.end());
-    // TODO: remove duplicates
-    return nuniqb;
+
+   // remove duplicates
+    comm.with_subset(read_pairs.begin() != read_pairs.end(), [&](const mxx::comm& comm){
+        // sort read pairs
+        mxx::sort(read_pairs.begin(), read_pairs.end(),
+                  [&](const std::pair<ReadIdType, ReadIdType> x,
+                      const std::pair<ReadIdType, ReadIdType> y){
+                    return (x < y);
+                  }, comm);
+
+        auto prevPair = mxx::right_shift(read_pairs.back(), comm);
+        if(comm.rank() == 0)
+          prevPair = std::make_pair((ReadIdType) std::numeric_limits<ReadIdType>::max(),
+                                    (ReadIdType) std::numeric_limits<ReadIdType>::max());
+        auto cur_itr = read_pairs.begin();
+        auto upd_itr = cur_itr;
+        while(cur_itr != read_pairs.end()){
+          if(*cur_itr != prevPair){
+            *upd_itr = *cur_itr;
+            prevPair = *cur_itr;
+            upd_itr++;
+          }
+          cur_itr++;
+        }
+      });
+   return nuniqb;
 }
 
 
@@ -417,7 +441,9 @@ void runFSO(mxx::comm& comm,
   uint64_t nuniqb = 0;
   comm.with_subset(
       local_rhpairs.begin() != local_rhpairs.end(), [&](const mxx::comm& comm){
-          nuniqb = generateOverlapReadPairs(comm, local_rhpairs);
+        std::vector< std::pair<uint64_t, uint64_t> > read_pairs;
+        nuniqb = generateOverlapReadPairs<uint64_t>(comm, local_rhpairs,
+                                                      read_pairs);
       });
   BL_BENCH_COLLECTIVE_END(rfso, "pair_gen", nuniqb, comm);
   BL_BENCH_REPORT_MPI_NAMED(rfso, "app", comm);
