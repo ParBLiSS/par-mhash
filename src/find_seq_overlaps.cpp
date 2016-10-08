@@ -275,7 +275,8 @@ void shiftStraddlingRegion(const mxx::comm& comm,
                            std::size_t& start_offset,
                            std::size_t& end_offset,
                            std::vector<BlockValueType>& straddle_region){
-    std::vector<BlockValueType> to_left, region_right, region_left;
+    // Assumes that the local_rhpairs has at least one element
+    std::vector<BlockValueType> to_left, right_region;
     // find the starting segment of local_rhpairs that straddles
     //  with the processor on the left
     auto lastv = local_rhpairs.back();
@@ -294,11 +295,12 @@ void shiftStraddlingRegion(const mxx::comm& comm,
         to_left.resize(osize);
         std::copy(local_rhpairs.begin(), fwx_itr, to_left.begin());
     }
-    region_right = mxx::left_shift(to_left, comm); // TODO: make sub-communicator
+    right_region = mxx::left_shift(to_left, comm); // TODO: make sub-communicator
     start_offset = std::distance(local_rhpairs.begin(), fwx_itr);
 
     // find the ending segment of local_rhpairs that straddles
     //  with the processor on the right
+    //  - there will be at least one value
     auto rvx_itr = local_rhpairs.rbegin();
     if(comm.rank() < comm.size() - 1) {
         for(;rvx_itr != local_rhpairs.rend();rvx_itr++){
@@ -306,25 +308,27 @@ void shiftStraddlingRegion(const mxx::comm& comm,
                 break;
         }
     }
-    auto rsize = std::distance(local_rhpairs.rbegin(), rvx_itr);
-    if(rsize < local_rhpairs.size()) // TODO: check this
-        end_offset = local_rhpairs.size() - rsize + 1;
+    auto left_region_size = std::distance(local_rhpairs.rbegin(), rvx_itr);
+    end_offset = local_rhpairs.size() - left_region_size;
 
-    // TODO: validate/check this again
-    straddle_region.resize(local_rhpairs.size()  - end_offset + region_right.size());
+    // straddling region
+    straddle_region.resize(left_region_size + right_region.size());
     std::copy(local_rhpairs.begin() + end_offset, local_rhpairs.end(),
               straddle_region.begin());
-    std::copy(region_right.begin(), region_right.end(),
-              straddle_region.begin() + rsize);
+    std::copy(right_region.begin(), right_region.end(),
+              straddle_region.begin() + left_region_size);
 
 }
 
 void generatePairs(const mxx::comm& comm,
                    std::vector<BlockValueType>::iterator start_itr,
-                   std::vector<BlockValueType>::iterator end_itr){
+                   std::vector<BlockValueType>::iterator end_itr,
+                   std::vector<std::pair<uint64_t, uint64_t>>& read_pairs){
     for(auto outer_itr = start_itr; outer_itr != end_itr; outer_itr++){
         for(auto inner_itr = outer_itr; inner_itr != end_itr; inner_itr++){
             // TODO: generate pair
+            read_pairs.push_back(std::make_pair(outer_itr->read_id,
+                                                inner_itr->read_id));
         }
     }
 }
@@ -332,6 +336,7 @@ void generatePairs(const mxx::comm& comm,
 uint64_t generateOverlapReadPairs(const mxx::comm& comm,
                                   std::vector<BlockValueType>&  local_rhpairs){
     uint64_t nuniqb = 0;
+    std::vector<std::pair<uint64_t, uint64_t>> read_pairs;
     auto lastv = local_rhpairs.back();
     auto prevx = mxx::right_shift(lastv, comm);
     for(auto curx : local_rhpairs){
@@ -347,9 +352,22 @@ uint64_t generateOverlapReadPairs(const mxx::comm& comm,
                           straddle_region);
 
     //
-    generatePairs(comm, straddle_region.begin(), straddle_region.end());
-    generatePairs(comm, local_rhpairs.begin() + start_offset,
-                  local_rhpairs.end() + end_offset);
+    generatePairs(comm, straddle_region.begin(), straddle_region.end(),
+                  read_pairs);
+    auto rbv_itr = local_rhpairs.begin() + start_offset;
+    auto prev_rbv = rhp_itrx;
+    for(rbv_itr++; rbv_itr != local_rhpairs.begin() + end_offset;
+        rbv_itr++){
+        if((*rbv_itr).hash_values == (*prev_rbv).hash_values)
+            continue;
+        generatePairs(comm, prev_rbv, rbv_itr, read_pairs);
+        prev_rbv = rbv_itr;
+    }
+    if(rbv_itr == local_rhpairs.begin() + end_offset && prev_rbv != rbv_itr)
+        generatePairs(comm, prev_rbv, rbv_itr, read_pairs);
+    // sort read pairs
+    mxx::sort(comm, read_pairs.begin(), read_pairs.end());
+    // TODO: remove duplicates
     return nuniqb;
 }
 
