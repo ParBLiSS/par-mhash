@@ -140,7 +140,6 @@ public:
 
 //
 // KMER : Kmer Type
-// seed_begin :
 // HBT : a type to store the resulting hash values, need to
 //      support the following operations
 //       - empty constructor
@@ -152,12 +151,12 @@ struct MinHashFunctionBlock {
 
     using value_type = HBT;
 
-    HBT operator()(const KMER& tx, std::size_t seed_begin){
+    HBT operator()(const KMER& tx, std::size_t seed_index){
         murmur<KMER> mmur_obj;
 
         HBT hbx;
         // std::cout << tx.getData()[0] << " ";
-        auto sdx = seed_begin * hash_block_size;
+        auto sdx = seed_index * hash_block_size;
         for(auto i = 0; (i < hbx.size()) && (sdx < hash_seeds_size);
             i++, sdx++){
             // std::cout << hrx[i] << " ";
@@ -234,7 +233,7 @@ struct SeqMinHashGenerator {
     template <typename SeqType, typename OutputIt>
     OutputIt operator()(SeqType & read, OutputIt output_iter) {
         static std::size_t seed_index = 0;
-        if(seed_index >= (hash_block_size * hash_block_count)){
+        if(seed_index >= (hash_block_count)){
             std::cout << "ERROR : seed index exceeded!!!" << std::endl;
             exit(1);
         }
@@ -307,7 +306,7 @@ struct SeqMinHashGenerator {
                 hrv.update_min(hx);
             }
         }
-        seed_index += hash_block_size;
+        seed_index++;
         *output_iter = hrv;
         return output_iter;
     }
