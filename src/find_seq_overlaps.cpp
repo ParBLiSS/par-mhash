@@ -151,12 +151,12 @@ struct MinHashFunctionBlock {
 
     using value_type = HBT;
 
-    HBT operator()(const KMER& tx, std::size_t seed_index){
+    HBT operator()(const KMER& tx, std::size_t sidx){
         murmur<KMER> mmur_obj;
 
         HBT hbx;
         // std::cout << tx.getData()[0] << " ";
-        auto sdx = seed_index * hash_block_size;
+        auto sdx = sidx * hash_block_size;
         for(auto i = 0; (i < hbx.size()) && (sdx < hash_seeds_size);
             i++, sdx++){
             // std::cout << hrx[i] << " ";
@@ -204,6 +204,7 @@ namespace mxx {
                                read_id, hash_values);
 }
 
+static std::size_t seed_index = 0;
 //
 // @tparam KmerType output value type of this parser. not necessarily the same
 //                  as the map's final storage type.
@@ -232,11 +233,6 @@ struct SeqMinHashGenerator {
     // @tparam OutputIt     output iterator type, inferred.
     template <typename SeqType, typename OutputIt>
     OutputIt operator()(SeqType & read, OutputIt output_iter) {
-        static std::size_t seed_index = 0;
-        if(seed_index >= (hash_block_count)){
-            std::cout << "ERROR : seed index exceeded!!!" << std::endl;
-            exit(1);
-        }
         MinHashFunctionBlockType hash_functions;
 
         static_assert(std::is_same< SeqType,
@@ -306,7 +302,6 @@ struct SeqMinHashGenerator {
                 hrv.update_min(hx);
             }
         }
-        seed_index++;
         *output_iter = hrv;
         return output_iter;
     }
@@ -340,7 +335,7 @@ void shiftStraddlingRegion(const mxx::comm& comm,
     }
     auto to_snd_size = snd_to_left.size();
     auto to_rcv_size = mxx::right_shift(to_snd_size, comm);
-    std::cout << snd_to_left.size() << std::endl;
+    // std::cout << snd_to_left.size() << std::endl;
     right_region = mxx_left_shift(snd_to_left, comm);
     start_offset = std::distance(local_rhpairs.begin(), fwx_itr);
 
@@ -393,6 +388,7 @@ uint64_t generateOverlapReadPairs(const mxx::comm& comm,
     // shift straddling
     shiftStraddlingRegion(comm, local_rhpairs, start_offset, end_offset,
                           straddle_region);
+   return straddle_region.size();
     // generate pairs
     uint64_t csize,
         max_size = generatePairs(comm,
@@ -413,8 +409,8 @@ uint64_t generateOverlapReadPairs(const mxx::comm& comm,
         csize = generatePairs(comm, prev_rbv, rbv_itr, read_pairs);
 
     if(csize > max_size) max_size = csize;
-
-   // remove duplicates
+    return max_size;
+    // remove duplicates
     comm.with_subset(read_pairs.begin() != read_pairs.end(), [&](const mxx::comm& comm){
         // sort read pairs
         mxx::sort(read_pairs.begin(), read_pairs.end(),
@@ -464,6 +460,7 @@ void generateSequencePairs(mxx::comm& comm,
   BL_BENCH_INIT(genpr);
   BL_BENCH_START(genpr);
 
+
   using SeqMinHashGeneratorType = SeqMinHashGenerator<
       MinHashFunctionBlock<KmerType, HashBlockType>, KmerType>;
   using RHBType = SeqMinHashGeneratorType::value_type;
@@ -499,8 +496,7 @@ void generateSequencePairs(mxx::comm& comm,
           generateOverlapReadPairs(comm, local_rhpairs, read_pairs);
       });
   BL_BENCH_COLLECTIVE_END(genpr, "pair_gen", max_block_size, comm);
-  BL_BENCH_REPORT_MPI_NAMED(genpr, "app", comm);
-
+  BL_BENCH_REPORT_MPI_NAMED(genpr, "genpair", comm);
 }
 
 void runFSO(mxx::comm& comm,
@@ -516,8 +512,14 @@ void runFSO(mxx::comm& comm,
   BL_BENCH_COLLECTIVE_END(rfso, "read_files", total, comm);
 
   BL_BENCH_START(rfso);
-  for(auto i = 0u; i < hash_block_count; i++)
+  for(auto i = 0u; i < hash_block_count; i++){
+      if(seed_index >= (hash_block_count)){
+        std::cout << "ERROR : seed index exceeded!!!" << std::endl;
+        exit(1);
+      }
       generateSequencePairs(comm, file_data.back());
+      seed_index++;
+  }
   BL_BENCH_COLLECTIVE_END(rfso, "all_pairs", total, comm);
 
   BL_BENCH_REPORT_MPI_NAMED(rfso, "app", comm);
