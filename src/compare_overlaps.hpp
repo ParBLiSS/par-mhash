@@ -87,6 +87,8 @@ void generateTruePairs(const mxx::comm& comm,
   std::vector<std::pair<T, T>> readPosPairs;
   loadPositionFile(comm, positionFile, readPosPairs);
   BL_BENCH_COLLECTIVE_END(cmpr, "load_pos", readPosPairs.size(), comm);
+  if(comm.rank() == 0 && readPosPairs.size() > 0)
+      std::cout << "FIRST RND : " << readPosPairs[0] << std::endl;
 
   // sort by positionFile
   BL_BENCH_START(cmpr);
@@ -99,6 +101,8 @@ void generateTruePairs(const mxx::comm& comm,
                     }, comm);
       });
   BL_BENCH_COLLECTIVE_END(cmpr, "sort_pairs", readPosPairs.size(), comm);
+  if(comm.rank() == 0 && readPosPairs.size() > 0)
+      std::cout << "FIRST SRT : " << readPosPairs[0] << std::endl;
 
   BL_BENCH_START(cmpr);
   // get the straddling region
