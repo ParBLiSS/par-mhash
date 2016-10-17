@@ -69,5 +69,6 @@ include_directories("${CMAKE_BINARY_DIR}")
 
 # include our src files
 include_directories("${PROJECT_SOURCE_DIR}/src")
-add_executable(find_seq_overlaps src/find_seq_overlaps.cpp)
+add_executable(find_seq_overlaps src/find_seq_overlaps.cpp src/io_utils.cpp)
 target_link_libraries(find_seq_overlaps ${EXTRA_LIBS} bliss-utils)
+

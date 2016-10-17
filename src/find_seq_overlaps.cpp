@@ -20,39 +20,15 @@
 #include "tclap/CmdLine.h"
 #include "utils/tclap_utils.hpp"
 
-// bug in mxx left_shift in specialization for std::vector
-template <typename T>
-std::vector<T> mxx_left_shift(const std::vector<T>& v, const mxx::comm& comm = mxx::comm())
-{
-    // get datatype
-    mxx::datatype dt = mxx::get_datatype<T>();
+#include "io_utils.hpp"
+#include "compare_overlaps.hpp"
 
-    // TODO: handle tags with MXX (get unique tag function)
-    int tag = 15;
-    // receive the size first
-    std::vector<T> result;
-    size_t right_size = mxx::left_shift(v.size(), comm);
+/// Hash Function Seed Values
+#include "hash_seeds.hpp"
 
-    MPI_Request recv_req;
-    // if not last processor
-    // TODO: replace with comm.send/ comm.recv which automatically will resolve
-    // to BIG MPI if message size is too large
-    if (comm.rank() < comm.size()-1 && right_size > 0) {
-        result.resize(right_size);
-        MPI_Irecv(&result[0], right_size, dt.type(), comm.rank()+1, tag,
-                  comm, &recv_req);
-    }
-    // if not first processor
-    if (comm.rank() > 0 && v.size() > 0) {
-        // send my most right element to the right
-        MPI_Send(const_cast<T*>(&v[0]), v.size(), dt.type(), comm.rank()-1, tag, comm);
-    }
-    if (right_size > 0 && comm.rank() < comm.size()-1) {
-        // wait for the async receive to finish
-        MPI_Wait(&recv_req, MPI_STATUS_IGNORE);
-    }
-    return result;
-}
+static const std::size_t hash_block_size = 4;
+static const std::size_t hash_block_count = 2;
+static const std::size_t hash_seeds_size = hash_block_count * hash_block_size;
 
 
 #if (pDNA == 16)
@@ -63,46 +39,46 @@ using Alphabet = bliss::common::DNA5;
 using Alphabet = bliss::common::DNA;
 #endif
 
+// constants
+#ifndef HASH_KMER_SIZE
+#define HASH_KMER_SIZE 31
+#endif
+
+
 #if (pPARSER == FASTQ)
 #define FileParser bliss::io::FASTQParser
 #elif (pPARSER == FASTA)
 #define FileParser bliss::io::FASTAParser
 #endif
 
-// constants
-#ifndef HASH_KMER_SIZE
-#define HASH_KMER_SIZE 31
-#endif
 
-static const std::size_t hash_block_size = 4;
-static const std::size_t hash_block_count = 2;
-static const std::size_t hash_seeds_size = hash_block_count * hash_block_size;
-
-/// Hash Function Seed Values
-constexpr static const uint32_t
-hash_seed_values[hash_seeds_size] = {
-    1000000007,
-    1000002043,
-    1000003097,
-    1000000079,
-    1000005103,
-    1000005203,
-    1000005353,
-    1000005403,
-};
+using FileReaderType = bliss::io::parallel::partitioned_file<
+  bliss::io::posix_file, FileParser>;
 
 // Kmer, FilerReader and Iterator data types
 using EdgeEncoding = Alphabet;
 using KmerType = bliss::common::Kmer<HASH_KMER_SIZE, Alphabet, WordType>;
-
-using FileReaderType = bliss::io::parallel::partitioned_file<
-    bliss::io::posix_file, FileParser>;
 
 template <typename Iterator, template <typename> class SeqParser>
 using SeqIterType = bliss::io::SequencesIterator<Iterator, SeqParser>;
 
 template <typename Iter>
 using NonEOLIter = bliss::iterator::filter_iterator<bliss::utils::file::NotEOL, Iter>;
+
+uint64_t load_file_data(mxx::comm& comm,
+                        std::vector<std::string>& inFiles,
+                        std::vector<bliss::io::file_data>& file_data){
+    uint64_t total = 0;
+    for (auto fn : inFiles) {
+        if (comm.rank() == 0) printf("READING %s via posix\n", fn.c_str());
+
+        FileReaderType fobj(fn, KmerType::size + 1, comm);
+
+        file_data.push_back(fobj.read_file());
+        total += file_data.back().getRange().size();
+    }
+    return total;
+}
 
 // Hash Value types
 using HashValueType = uint64_t;
@@ -307,65 +283,6 @@ struct SeqMinHashGenerator {
     }
 };
 
-template<typename BVT>
-void shiftStraddlingRegion(const mxx::comm& comm,
-                           std::vector<BVT>&  local_rhpairs,
-                           std::size_t& start_offset,
-                           std::size_t& end_offset,
-                           std::vector<BVT>& straddle_region){
-    // Assumes that the local_rhpairs has at least one element
-    std::vector<BVT> snd_to_left, right_region;
-    // find the starting segment of local_rhpairs that straddles
-    //  with the processor on the left
-    auto lastv = local_rhpairs.back();
-    auto prevx = mxx::right_shift(lastv, comm);
-
-    auto fwx_itr = local_rhpairs.begin();
-    if(comm.rank() > 0){
-        for(;fwx_itr != local_rhpairs.end(); fwx_itr++){
-            if((*fwx_itr).hash_values != prevx.hash_values)
-                break;
-        }
-    }
-
-    if(fwx_itr != local_rhpairs.begin()){
-        auto osize = std::distance(local_rhpairs.begin(), fwx_itr);
-        snd_to_left.resize(osize);
-        std::copy(local_rhpairs.begin(), fwx_itr, snd_to_left.begin());
-    }
-    auto to_snd_size = snd_to_left.size();
-    auto to_rcv_size = mxx::right_shift(to_snd_size, comm);
-    // std::cout << snd_to_left.size() << std::endl;
-    right_region = mxx_left_shift(snd_to_left, comm);
-    start_offset = std::distance(local_rhpairs.begin(), fwx_itr);
-    int soffset = (int)  (start_offset ==  local_rhpairs.size());
-    auto total =  mxx::allreduce(soffset);
-    if(comm.rank() == 0)
-      std::cout << "Total : "<< total << std::endl;
-
-    // find the ending segment of local_rhpairs that straddles
-    //  with the processor on the right
-    //  - there will be at least one value
-    auto rvx_itr = local_rhpairs.rbegin();
-    if(comm.rank() < comm.size() - 1) {
-        for(;rvx_itr != local_rhpairs.rend();rvx_itr++){
-            if((*rvx_itr).hash_values != lastv.hash_values)
-                break;
-        }
-    }
-    auto left_region_size = std::distance(local_rhpairs.rbegin(), rvx_itr);
-    end_offset = local_rhpairs.size() - left_region_size;
-    //std::cout << left_region_size;
-
-    // construct straddling region from left and right region
-    straddle_region.resize(left_region_size + right_region.size());
-    std::copy(local_rhpairs.begin() + end_offset, local_rhpairs.end(),
-              straddle_region.begin());
-    std::copy(right_region.begin(), right_region.end(),
-              straddle_region.begin() + left_region_size);
-
-}
-
 template<typename Iterator, typename ReadIdType=uint64_t>
 uint64_t generatePairs(const mxx::comm& comm,
                        Iterator start_itr,
@@ -390,9 +307,14 @@ uint64_t generateOverlapReadPairs(const mxx::comm& comm,
                               std::vector< std::pair<ReadIdType, ReadIdType> >& read_pairs){
     std::size_t start_offset, end_offset;
     std::vector<BVT> straddle_region;
+    //if((*rvx_itr).hash_values != lastv.hash_values)
+
     // shift straddling
     shiftStraddlingRegion(comm, local_rhpairs, start_offset, end_offset,
-                          straddle_region);
+                          straddle_region,
+                          [&](const BVT& x, const BVT& y){
+                              return (x.hash_values == y.hash_values);
+                          });
     if(local_rhpairs.size() > 0 && start_offset >= local_rhpairs.size()){
         std::cout << "ERROR : start offset beyond size!!!" << std::endl;
         exit(1);
@@ -457,22 +379,6 @@ uint64_t generateOverlapReadPairs(const mxx::comm& comm,
       });
     return read_pairs.size();
 }
-
-uint64_t load_file_data(mxx::comm& comm,
-                        std::vector<std::string>& inFiles,
-                        std::vector<bliss::io::file_data>& file_data){
-    uint64_t total = 0;
-    for (auto fn : inFiles) {
-        if (comm.rank() == 0) printf("READING %s via posix\n", fn.c_str());
-
-        FileReaderType fobj(fn, KmerType::size + 1, comm);
-
-        file_data.push_back(fobj.read_file());
-        total += file_data.back().getRange().size();
-    }
-    return total;
-}
-
 
 
 
@@ -539,8 +445,12 @@ void generateSequencePairs(mxx::comm& comm,
   BL_BENCH_REPORT_MPI_NAMED(genpr, "genpair", comm);
 }
 
+template<typename T=uint64_t>
 void runFSO(mxx::comm& comm,
-            std::vector<std::string>& inFiles, std::string outPrefix){
+            std::string positionFile,
+            std::vector<std::string>& inFiles,
+            std::string outPrefix,
+            uint32_t threshold){
 
   // Read files
   BL_BENCH_INIT(rfso);
@@ -552,7 +462,7 @@ void runFSO(mxx::comm& comm,
   BL_BENCH_COLLECTIVE_END(rfso, "read_files", total, comm);
 
   BL_BENCH_START(rfso);
-  std::vector< std::pair<uint64_t, uint64_t> > read_pairs;
+  std::vector< std::pair<T, T> > read_pairs;
   for(auto i = 0u; i < hash_block_count; i++){
       if(seed_index >= (hash_block_count)){
         std::cout << "ERROR : seed index exceeded!!!" << std::endl;
@@ -566,25 +476,45 @@ void runFSO(mxx::comm& comm,
   auto total_pairs = mxx::allreduce(read_pairs.size());
   if(comm.rank()  == 0)
       std::cout << "Total Read Pairs : " << total_pairs << std::endl;
+
+
+  BL_BENCH_START(rfso);
+  compareOverLaps(comm, positionFile, read_pairs, threshold);
+  BL_BENCH_COLLECTIVE_END(rfso, "compare_overlaps", read_pairs.size(), comm);
   BL_BENCH_REPORT_MPI_NAMED(rfso, "rfso_app", comm);
 }
 
 void parse_args(int argc, char **argv,
                 mxx::comm& comm,
+                std::string& positionFile,
                 std::vector<std::string>& filenames,
-                std::string& outPrefix){
+                std::string& outPrefix,
+                uint32_t& threshold){
   try { // try-catch block for commandline
 
-    TCLAP::CmdLine cmd("Parallel de bruijn graph compaction", ' ', "0.1");
+    TCLAP::CmdLine cmd("Overlap Graph Construction", ' ', "0.1");
 
     // MPI friendly commandline output.
     bliss::utils::tclap::MPIOutput cmd_output(comm);
     cmd.setOutput(&cmd_output);
 
+   // position file argument
+    TCLAP::ValueArg<std::string> positionArg("p", "position_file",
+                                             "Position for input file (full path)",
+                                             true, "", "string", cmd);
+
+
+
     // output file argument
     TCLAP::ValueArg<std::string> outputArg("O", "output_prefix",
                                            "Prefix for output files, including directory",
                                            false, "", "string", cmd);
+
+    // threshold argument
+    TCLAP::ValueArg<uint32_t> threshArg("t", "overlap_threshold",
+                                          "Threshold for Overlap",
+                                          false, 20, "int", cmd);
+
 
     // input files
     TCLAP::UnlabeledMultiArg<std::string> fileArg("filenames", "FASTA or FASTQ file names",
@@ -594,8 +524,10 @@ void parse_args(int argc, char **argv,
     // Parse the argv array.
     cmd.parse( argc, argv );
 
+    positionFile = positionArg.getValue();
     outPrefix = outputArg.getValue();
     filenames = fileArg.getValue();
+    threshold = threshArg.getValue();
 
   } catch (TCLAP::ArgException &e)  {
     std::cerr << "error: " << e.error() << " for arg " << e.argId() << std::endl;
@@ -614,12 +546,15 @@ int main(int argc, char** argv) {
     std::cout << "EXECUTING " << std::string(argv[0]) << std::endl;
 
 
+  std::string positionFile;
   std::vector<std::string> filenames;
   std::string outPrefix;
+  uint32_t threshold;
   outPrefix.assign("./output");
 
   // parse arguments
-  parse_args(argc, argv, comm, filenames, outPrefix);
+  parse_args(argc, argv, comm,
+             positionFile, filenames, outPrefix, threshold);
   if(comm.rank() == 0 && filenames.size() > 0){
     for(auto fx : filenames) std::cout << fx << std::endl;
   }
@@ -631,7 +566,7 @@ int main(int argc, char** argv) {
   // if(!comm.rank())
   //    std::cout << "Beginning computation, timer started" << std::endl;
 
-  runFSO(comm, filenames, outPrefix);
+  runFSO(comm, positionFile, filenames, outPrefix, threshold);
 
 
   comm.barrier();
