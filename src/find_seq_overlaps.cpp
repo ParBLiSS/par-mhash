@@ -169,7 +169,7 @@ struct MinHashFunctionBlock {
 
 template<typename BT>
 struct ReadMinHashBlock{
-    std::size_t read_id;
+    std::size_t seq_id;
     BT hash_values;
 
     void reset(){
@@ -182,7 +182,7 @@ struct ReadMinHashBlock{
     }
 
     void print(std::ostream& ofs){
-        ofs << read_id << " ";
+        ofs << seq_id << " ";
         for(auto i = 0; i < hash_values.size();i++)
             ofs << hash_values[i] << " ";
     }
@@ -197,11 +197,11 @@ struct ReadMinHashBlock{
 #define WRAP_TEMPLATE(...) __VA_ARGS__
 
 // defining your own type for structs which are non-templated
-// MXX_CUSTOM_STRUCT(ReadMinHashBlock, read_id, hash_values);
+// MXX_CUSTOM_STRUCT(ReadMinHashBlock, seq_id, hash_values);
 namespace mxx {
     template <typename BT>
     MXX_CUSTOM_TEMPLATE_STRUCT(WRAP_TEMPLATE(ReadMinHashBlock<BT>), \
-                               read_id, hash_values);
+                               seq_id, hash_values);
 }
 
 //
@@ -282,7 +282,7 @@ struct SeqMinHashGenerator {
         bliss::partition::range<size_t> seq_range(
             read.seq_global_offset(), read.seq_global_offset() + read.seq_size());
         value_type hrv;
-        hrv.read_id = read.id.get_pos();
+        hrv.seq_id = read.id.get_pos();
         if (seq_range.contains(valid_range.end)) {
             // seq_range contains overlap.
             // not checking by end iterator at valid_range.end, since the NonEOLIter
@@ -376,8 +376,8 @@ uint64_t generatePairs(const mxx::comm& comm,
     for(auto outer_itr = start_itr; outer_itr != end_itr; outer_itr++){
         for(auto inner_itr = outer_itr; inner_itr != end_itr; inner_itr++){
             // generate pair
-            read_pairs.push_back(std::make_pair(outer_itr->read_id,
-                                                inner_itr->read_id));
+            read_pairs.push_back(std::make_pair(outer_itr->seq_id,
+                                                inner_itr->seq_id));
         }
     }
     return nsize;
@@ -475,6 +475,22 @@ void generateSequencePairs(mxx::comm& comm,
                     SeqIterType>(file_data, local_rhpairs, comm);
 
   BL_BENCH_COLLECTIVE_END(genpr, "compute_hash", local_rhpairs.size(), comm);
+
+  BL_BENCH_START(genpr);
+  auto cmp_fn = [&](const RHBType& x, const RHBType& y){
+    return (x.seq_id < y.seq_id);
+  };
+  if(!mxx::is_sorted(local_rhpairs.begin(), local_rhpairs.end(),
+                     cmp_fn, comm))
+    mxx::sort(local_rhpairs.begin(), local_rhpairs.end(), cmp_fn, comm);
+
+  auto seq_idx = mxx::scan(local_rhpairs.size(), comm);
+  if(local_rhpairs.size() > 0)
+    seq_idx -= local_rhpairs.size();
+  for(auto fitr = local_rhpairs.begin(); fitr != local_rhpairs.end(); fitr++, seq_idx++)
+    fitr->seq_id = seq_idx;
+
+  BL_BENCH_COLLECTIVE_END(genpr, "assign_ids", local_rhpairs.size(), comm);
 
   BL_BENCH_START(genpr);
 
