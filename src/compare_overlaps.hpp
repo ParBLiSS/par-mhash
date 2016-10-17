@@ -82,11 +82,15 @@ void generateTruePairs(const mxx::comm& comm,
                        std::string positionFile,
                        uint32_t threshold,
                        std::vector<std::pair<T, T>>& truePairs){
+  BL_BENCH_INIT(cmpr);
+  BL_BENCH_START(cmpr);
   // load the position file
   std::vector<std::pair<T, T>> readPosPairs;
   loadPositionFile(comm, positionFile, readPosPairs);
+  BL_BENCH_COLLECTIVE_END(cmpr, "load_pos", readPosPairs.size(), comm);
 
   // sort by positionFile
+  BL_BENCH_START(cmpr);
   comm.with_subset(
       readPosPairs.begin() != readPosPairs.end(), [&](const mxx::comm& comm){
           mxx::sort(readPosPairs.begin(), readPosPairs.end(),
@@ -95,11 +99,13 @@ void generateTruePairs(const mxx::comm& comm,
                         return x.second < y.second;
                     }, comm);
       });
-
+  BL_BENCH_COLLECTIVE_END(cmpr, "sort_pairs", readPosPairs.size(), comm);
+  
+  BL_BENCH_START(cmpr);
   // get the straddling region
   uint64_t startOffset, endOffset;
   auto posCompare = [&](const std::pair<T,T>& x,
-                         const std::pair<T,T>& y){
+                        const std::pair<T,T>& y){
       return abs(x.second - y.second) < threshold;
   };
 
@@ -107,13 +113,18 @@ void generateTruePairs(const mxx::comm& comm,
   shiftStraddlingRegion(comm, readPosPairs,
                         startOffset, endOffset,
                         straddleRegion, posCompare);
+  BL_BENCH_COLLECTIVE_END(cmpr, "shift_straddle", straddleRegion.size(), comm);
 
+  BL_BENCH_START(cmpr);
   std::vector<std::pair<T,T>> localRegion;
   localRegion.resize(endOffset + straddleRegion.size()); // TODO: check if this is correct
   std::copy(readPosPairs.begin(), readPosPairs.begin() + endOffset,
             localRegion.begin());
   std::copy(straddleRegion.begin(), straddleRegion.end(),
-            localRegion.begin() + localRegion.size());
+            localRegion.begin() + endOffset);
+  BL_BENCH_COLLECTIVE_END(cmpr, "local_region", localRegion.size(), comm);
+  BL_BENCH_REPORT_MPI_NAMED(cmpr, "cmpr_app", comm);
+  return;
 
   // generate pairs
   findTruePairs(localRegion, truePairs, threshold);

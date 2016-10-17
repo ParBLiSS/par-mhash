@@ -566,7 +566,9 @@ int main(int argc, char** argv) {
   // if(!comm.rank())
   //    std::cout << "Beginning computation, timer started" << std::endl;
 
-  runFSO(comm, positionFile, filenames, outPrefix, threshold);
+  //runFSO(comm, positionFile, filenames, outPrefix, threshold);
+  std::vector< std::pair<uint64_t, uint64_t> > read_pairs;
+  compareOverLaps(comm, positionFile, read_pairs, threshold);
 
 
   comm.barrier();
