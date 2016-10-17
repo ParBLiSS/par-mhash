@@ -14,7 +14,7 @@
 template <typename T>
 void findTruePairs (std::vector<std::pair<T,T> >& read_pos,
                     std::vector<std::pair<T,T> >& read_pairs,
-                    uint32_t thresh) {
+                    uint64_t thresh) {
     std::size_t up=0, down=1;
     while(true) {
         if (up >= read_pos.size()) {
@@ -24,18 +24,17 @@ void findTruePairs (std::vector<std::pair<T,T> >& read_pos,
             if (down >= read_pos.size()) {
                 break;
             }
-            if (read_pos[down].second - read_pos[up].second < thresh) {
+            if (read_pos[down].second < (read_pos[up].second + thresh)) {
                 down++;
-            }
-            else {
+            } else {
                 break;
             }
         }
         assert(down > up);
         // gen pairs [up,down)
-        for (long unsigned int pos=up+1; pos < down; pos++) {
-            auto P = std::make_pair(read_pos[up].first, read_pos[pos].first);
-            read_pairs.push_back(P);
+        for (std::size_t pos=up+1; pos < down; pos++) {
+            read_pairs.push_back(std::make_pair(read_pos[up].first,
+                                                read_pos[pos].first));
         }
         up++;
     }
@@ -100,13 +99,14 @@ void generateTruePairs(const mxx::comm& comm,
                     }, comm);
       });
   BL_BENCH_COLLECTIVE_END(cmpr, "sort_pairs", readPosPairs.size(), comm);
-  
+
   BL_BENCH_START(cmpr);
   // get the straddling region
   uint64_t startOffset, endOffset;
   auto posCompare = [&](const std::pair<T,T>& x,
                         const std::pair<T,T>& y){
-      return abs(x.second - y.second) < threshold;
+      return ((x.second > y.second) ?
+              (x.second - y.second) : (y.second - x.second)) < threshold;
   };
 
   std::vector<std::pair<T,T>> straddleRegion;
