@@ -90,9 +90,9 @@ void shiftStraddlingRegion(const mxx::comm& comm,
     right_region = mxx_left_shift(snd_to_left, comm);
     start_offset = std::distance(local_rhpairs.begin(), fwx_itr);
     int soffset = (int)  (start_offset ==  local_rhpairs.size());
-    auto total =  mxx::allreduce(soffset);
-    if(comm.rank() == 0)
-      std::cout << "Total : "<< total << std::endl;
+    // auto total =  mxx::allreduce(soffset);
+    // if(comm.rank() == 0)
+    //   std::cout << "Total : "<< total << std::endl;
 
     // find the ending segment of local_rhpairs that straddles
     //  with the processor on the right

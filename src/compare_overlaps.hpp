@@ -102,7 +102,12 @@ void generateTruePairs(const mxx::comm& comm,
       });
   BL_BENCH_COLLECTIVE_END(cmpr, "sort_pairs", readPosPairs.size(), comm);
   if(comm.rank() == 0 && readPosPairs.size() > 0)
-      std::cout << "FIRST SRT : " << readPosPairs[0] << std::endl;
+      std::cout << "FIRST SRT : " << readPosPairs.front() << std::endl;
+  if(comm.rank() == (comm.size() - 1) && readPosPairs.size() > 0)
+      std::cout << "LAST SRT : " << readPosPairs.back() << std::endl;
+  auto totalPosPairs = mxx::allreduce(readPosPairs.size(), comm);
+  if(comm.rank() == 0)
+     std::cout << "POS TOTAL : " << totalPosPairs << std::endl;
 
   BL_BENCH_START(cmpr);
   // get the straddling region
@@ -127,11 +132,13 @@ void generateTruePairs(const mxx::comm& comm,
   std::copy(straddleRegion.begin(), straddleRegion.end(),
             localRegion.begin() + endOffset);
   BL_BENCH_COLLECTIVE_END(cmpr, "local_region", localRegion.size(), comm);
-  BL_BENCH_REPORT_MPI_NAMED(cmpr, "cmpr_app", comm);
-  return;
 
   // generate pairs
+  BL_BENCH_START(cmpr);
   findTruePairs(localRegion, truePairs, threshold);
+  BL_BENCH_COLLECTIVE_END(cmpr, "true_pairs", truePairs.size(), comm);
+  BL_BENCH_REPORT_MPI_NAMED(cmpr, "cmpr_app", comm);
+  return;
 }
 
 template<typename T>
@@ -143,6 +150,10 @@ void compareOverLaps(const mxx::comm& comm,
     // generate true pairs
     std::vector<std::pair<T, T>> truePairs;
     generateTruePairs(comm, positionFile, threshold, truePairs);
+
+    auto totalTruePairs = mxx::allreduce(truePairs.size(), comm);
+    if(comm.rank() == 0)
+       std::cout << "TRUE TOTAL : " << totalTruePairs << std::endl;
 }
 
 

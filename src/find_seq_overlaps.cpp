@@ -27,7 +27,7 @@
 #include "hash_seeds.hpp"
 
 static const std::size_t hash_block_size = 4;
-static const std::size_t hash_block_count = 2;
+static const std::size_t hash_block_count = 250;
 static const std::size_t hash_seeds_size = hash_block_count * hash_block_size;
 
 
@@ -41,7 +41,7 @@ using Alphabet = bliss::common::DNA;
 
 // constants
 #ifndef HASH_KMER_SIZE
-#define HASH_KMER_SIZE 31
+#define HASH_KMER_SIZE 29
 #endif
 
 
@@ -335,7 +335,7 @@ uint64_t generateOverlapReadPairs(const mxx::comm& comm,
     auto max_size = csize;
     auto rbv_itr = local_rhpairs.begin() + start_offset;
     auto prev_rbv = rbv_itr;
-    return max_size;
+
     for(;(rbv_itr != local_rhpairs.begin() + end_offset) &&
          (rbv_itr != local_rhpairs.end());
         rbv_itr++){
@@ -381,13 +381,12 @@ uint64_t generateOverlapReadPairs(const mxx::comm& comm,
 }
 
 
-
+template<typename T>
 void generateSequencePairs(mxx::comm& comm,
                            bliss::io::file_data& file_data,
-                           std::vector< std::pair<uint64_t, uint64_t> >& read_pairs) {
+                           std::vector< std::pair<T, T> >& read_pairs) {
   BL_BENCH_INIT(genpr);
   BL_BENCH_START(genpr);
-
 
   using SeqMinHashGeneratorType = SeqMinHashGenerator<
       MinHashFunctionBlock<KmerType, HashBlockType>, KmerType>;
@@ -431,8 +430,8 @@ void generateSequencePairs(mxx::comm& comm,
             }, comm);
   BL_BENCH_COLLECTIVE_END(genpr, "sort_records", local_rhpairs.size(), comm);
   auto total_pairs = mxx::allreduce(local_rhpairs.size());
-  if(comm.rank()  == 0)
-      std::cout << "Total RH Pairs : " << total_pairs << std::endl;
+  //if(comm.rank()  == 0)
+  //    std::cout << "TOTAL RH Pairs : " << total_pairs << std::endl;
 
   BL_BENCH_START(genpr);
   uint64_t max_block_size = 0;
@@ -442,7 +441,7 @@ void generateSequencePairs(mxx::comm& comm,
           generateOverlapReadPairs(comm, local_rhpairs, read_pairs);
       });
   BL_BENCH_COLLECTIVE_END(genpr, "pair_gen", max_block_size, comm);
-  BL_BENCH_REPORT_MPI_NAMED(genpr, "genpair", comm);
+  //BL_BENCH_REPORT_MPI_NAMED(genpr, "genpair", comm);
 }
 
 template<typename T=uint64_t>
@@ -473,14 +472,15 @@ void runFSO(mxx::comm& comm,
   }
   BL_BENCH_COLLECTIVE_END(rfso, "all_pairs", read_pairs.size(), comm);
 
-  auto total_pairs = mxx::allreduce(read_pairs.size());
+  auto totalHashPairs = mxx::allreduce(read_pairs.size());
   if(comm.rank()  == 0)
-      std::cout << "Total Read Pairs : " << total_pairs << std::endl;
+      std::cout << "TOTAL Hash Pairs : " << totalHashPairs << std::endl;
 
 
   BL_BENCH_START(rfso);
   compareOverLaps(comm, positionFile, read_pairs, threshold);
   BL_BENCH_COLLECTIVE_END(rfso, "compare_overlaps", read_pairs.size(), comm);
+
   BL_BENCH_REPORT_MPI_NAMED(rfso, "rfso_app", comm);
 }
 
@@ -529,6 +529,15 @@ void parse_args(int argc, char **argv,
     filenames = fileArg.getValue();
     threshold = threshArg.getValue();
 
+    if(comm.rank() == 0){
+      std::cout << "--------------------------------------" << std::endl;
+      std::cout << "Position File   : " << positionFile << std::endl;
+      std::cout << "Output File Pfx : " << outPrefix << std::endl;
+      std::cout << "Input File      : " << filenames.front() << std::endl;
+      std::cout << "Threshold       : " << threshold << std::endl;
+      std::cout << "--------------------------------------" << std::endl;
+    }
+
   } catch (TCLAP::ArgException &e)  {
     std::cerr << "error: " << e.error() << " for arg " << e.argId() << std::endl;
     exit(-1);
@@ -561,22 +570,22 @@ int main(int argc, char** argv) {
 
   // runFSO
   comm.barrier();
-  // auto start = std::chrono::steady_clock::now();
+  auto start = std::chrono::steady_clock::now();
 
-  // if(!comm.rank())
-  //    std::cout << "Beginning computation, timer started" << std::endl;
+  if(!comm.rank())
+      std::cout << "Timer started" << std::endl;
 
-  //runFSO(comm, positionFile, filenames, outPrefix, threshold);
-  std::vector< std::pair<uint64_t, uint64_t> > read_pairs;
-  compareOverLaps(comm, positionFile, read_pairs, threshold);
+  runFSO(comm, positionFile, filenames, outPrefix, threshold);
+  // std::vector< std::pair<uint64_t, uint64_t> > read_pairs;
+  // compareOverLaps(comm, positionFile, read_pairs, threshold);
 
 
   comm.barrier();
-  // auto end = std::chrono::steady_clock::now();
-  // auto elapsed_time  = std::chrono::duration<double, std::milli>(end - start).count();
+  auto end = std::chrono::steady_clock::now();
+  auto elapsed_time  = std::chrono::duration<double, std::milli>(end - start).count();
 
-  // if(!comm.rank())
-  //    std::cout << "Time (ms) -> " << elapsed_time << std::endl;
+  if(!comm.rank())
+      std::cout << "Time (ms) -> " << elapsed_time << std::endl;
 
  // TODO: compute elapsed time
 }
