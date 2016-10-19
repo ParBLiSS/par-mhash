@@ -68,7 +68,7 @@ void loadPositionFile(const mxx::comm& comm,
     std::stringstream strStream(rcd);
     strStream >> inValue;
     *rpItr = std::make_pair(startIdx, inValue);
-    rpItr++; startIdx++;
+    rpItr++;
     strStream >> inValue;
     *rpItr = std::make_pair(startIdx + nRecords, inValue);
     rpItr++; startIdx++;
@@ -112,8 +112,8 @@ void generateTruePairs(const mxx::comm& comm,
   std::vector<std::pair<T, T>> readPosPairs;
   loadPositionFile(comm, positionFile, readPosPairs);
   BL_BENCH_COLLECTIVE_END(cmpr, "load_pos", readPosPairs.size(), comm);
-  if(comm.rank() == 0 && readPosPairs.size() > 0)
-      std::cout << "FIRST RND : " << readPosPairs[0] << std::endl;
+  if(comm.rank() == 0 && readPosPairs.size() > 2)
+      std::cout << "FIRST RND : " << readPosPairs[2] << std::endl;
 
   // sort by positionFile
   BL_BENCH_START(cmpr);
