@@ -26,9 +26,9 @@
 /// Hash Function Seed Values
 #include "hash_seeds.hpp"
 
-static const std::size_t hash_block_size = 4;
-static const std::size_t hash_block_count = 250;
-static const std::size_t hash_seeds_size = hash_block_count * hash_block_size;
+const static std::size_t hash_block_size = 4;
+static std::size_t hash_block_count = 250;
+static std::size_t hash_seeds_size;
 
 
 #if (pDNA == 16)
@@ -511,9 +511,19 @@ void parse_args(int argc, char **argv,
                                            false, "", "string", cmd);
 
     // threshold argument
-    TCLAP::ValueArg<uint32_t> threshArg("t", "overlap_threshold",
+    TCLAP::ValueArg<uint32_t> threshArg("d", "overlap_threshold",
                                           "Threshold for Overlap",
                                           false, 20, "int", cmd);
+
+    // block count argument
+    TCLAP::ValueArg<std::size_t> blockCountArg("B", "block_count",
+                                               "Number of blocks",
+                                               false, 250, "int", cmd);
+
+    // block size argument
+    //TCLAP::ValueArg<std::size_t> blockSizeArg("T", "block_size",
+    //                                          "Block Size",
+    //                                          false, 4, "int", cmd);
 
 
     // input files
@@ -528,6 +538,8 @@ void parse_args(int argc, char **argv,
     outPrefix = outputArg.getValue();
     filenames = fileArg.getValue();
     threshold = threshArg.getValue();
+    hash_block_count = blockCountArg.getValue();
+    // hash_block_size = blockSizeArg.getValue();
 
     if(comm.rank() == 0){
       std::cout << "--------------------------------------" << std::endl;
@@ -535,6 +547,8 @@ void parse_args(int argc, char **argv,
       std::cout << "Output File Pfx : " << outPrefix << std::endl;
       std::cout << "Input File      : " << filenames.front() << std::endl;
       std::cout << "Threshold       : " << threshold << std::endl;
+      std::cout << "Block Size      : " << hash_block_size << std::endl;
+      std::cout << "Block Count     : " << hash_block_count << std::endl;
       std::cout << "--------------------------------------" << std::endl;
     }
 
@@ -566,6 +580,14 @@ int main(int argc, char** argv) {
              positionFile, filenames, outPrefix, threshold);
   if(comm.rank() == 0 && filenames.size() > 0){
     for(auto fx : filenames) std::cout << fx << std::endl;
+  }
+
+  auto availableSeeeds = sizeof(hash_seed_values);
+  availableSeeeds /= sizeof(hash_seed_values[0]);
+  if(availableSeeeds < (hash_block_size * hash_block_count)){
+      if(comm.rank() == 0)
+          std::cout << "Not Enough seeds : " << std::endl;
+      return 1;
   }
 
   // runFSO
