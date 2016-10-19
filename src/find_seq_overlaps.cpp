@@ -30,18 +30,17 @@ const static std::size_t hash_block_size = 4;
 static std::size_t hash_block_count = 250;
 static std::size_t hash_seeds_size;
 
-
-#if (pDNA == 16)
-using Alphabet = bliss::common::DNA16;
+#if (pDNA == 4)
+using Alphabet = bliss::common::DNA;
 #elif (pDNA == 5)
 using Alphabet = bliss::common::DNA5;
-#elif (pDNA == 4)
-using Alphabet = bliss::common::DNA;
+#elif (pDNA == 16)
+using Alphabet = bliss::common::DNA16;
 #endif
 
 // constants
 #ifndef HASH_KMER_SIZE
-#define HASH_KMER_SIZE 29
+#define HASH_KMER_SIZE 31
 #endif
 
 
@@ -268,13 +267,16 @@ struct SeqMinHashGenerator {
                     >= valid_dist) {
                     break;
                 }
-
-                HashBlockType hx = hash_functions(*it, seed_index);
+                KmerType ckx = *it;
+                auto rcx = ckx.reverse_complement();
+                HashBlockType hx = hash_functions((*it < rcx) ? *it : rcx, seed_index);
                 hrv.update_min(hx); // pick the minimum
             }
         } else {
             for (auto it = start; it != end; ++it)  {
-                HashBlockType hx = hash_functions(*it, seed_index);
+                KmerType ckx = *it;
+                auto rcx = ckx.reverse_complement();
+                HashBlockType hx = hash_functions((ckx < rcx) ? ckx : rcx, seed_index);
                 hrv.update_min(hx);
             }
         }
