@@ -53,6 +53,15 @@ void loadPositionFile(const mxx::comm& comm,
   // load the block
   std::vector<std::string> bufferStore;
   read_block(comm, positionFile, offsetStart, offsetEnd, bufferStore);
+  // for(int i = 0; i < comm.size();i++){
+  //     comm.barrier();
+  //     if(comm.rank() == i){
+  //         std::cout << i << " BF TOTAL : " << bufferStore.size() << std::endl;
+  //         for(auto rx : bufferStore)
+  //             std::cout << "[" << rx << "]" << std::endl;
+  //     }
+  //     comm.barrier();
+  // }
 
   // generate the pairs
   // input position file has format for paired end reads:
@@ -112,8 +121,6 @@ void generateTruePairs(const mxx::comm& comm,
   std::vector<std::pair<T, T>> readPosPairs;
   loadPositionFile(comm, positionFile, readPosPairs);
   BL_BENCH_COLLECTIVE_END(cmpr, "load_pos", readPosPairs.size(), comm);
-  if(comm.rank() == 0 && readPosPairs.size() > 2)
-      std::cout << "FIRST RND : " << readPosPairs[2] << std::endl;
 
   // sort by positionFile
   BL_BENCH_START(cmpr);
@@ -126,13 +133,18 @@ void generateTruePairs(const mxx::comm& comm,
                     }, comm);
       });
   BL_BENCH_COLLECTIVE_END(cmpr, "sort_pairs", readPosPairs.size(), comm);
-  if(comm.rank() == 0 && readPosPairs.size() > 0)
-      std::cout << "FIRST SRT : " << readPosPairs.front() << std::endl;
-  if(comm.rank() == (comm.size() - 1) && readPosPairs.size() > 0)
-      std::cout << "LAST SRT : " << readPosPairs.back() << std::endl;
   auto totalPosPairs = mxx::allreduce(readPosPairs.size(), comm);
   if(comm.rank() == 0)
      std::cout << "POS TOTAL : " << totalPosPairs << std::endl;
+  // for(int i = 0; i < comm.size();i++){
+  //     comm.barrier();
+  //     if(comm.rank() == i){
+  //         std::cout << i << " RP TOTAL : " << readPosPairs.size() << std::endl;
+  //         for(auto rx : readPosPairs)
+  //             std::cout << "" << rx << std::endl;
+  //     }
+  //     comm.barrier();
+  // }
 
   BL_BENCH_START(cmpr);
   // get the straddling region
@@ -167,7 +179,17 @@ void generateTruePairs(const mxx::comm& comm,
   eliminateDuplicates(comm, truePairs);
   BL_BENCH_COLLECTIVE_END(cmpr, "unique_pairs", truePairs.size(), comm);
   BL_BENCH_REPORT_MPI_NAMED(cmpr, "cmpr_app", comm);
-  return;
+  // for(int i = 0; i < comm.size(); i++){
+  //     comm.barrier();
+  //     if(comm.rank() == i) {
+  //         std::cout << i << " : LR TOTAL : " << truePairs.size() << std::endl;
+  //         for(auto rx : truePairs)
+  //             std::cout << "" << rx << std::endl;
+  //     }
+  //     comm.barrier();
+  // }
+
+  // return;
 }
 
 template<typename T>

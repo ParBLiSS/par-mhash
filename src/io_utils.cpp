@@ -68,15 +68,18 @@ void read_block(const mxx::comm& comm,
   if(comm.rank() > 0 && in_stream.good()){
     std::string rd_line;
     std::getline(in_stream, rd_line);
+    // std::cout << "RX : " << rd_line << std::endl;
     // right on the new line character, then read another line
-    if(trim(rd_line).length() == 0 && in_stream.good())
-      std::getline(in_stream, rd_line);
+    //if(trim(rd_line).length() > 0 && in_stream.good())
+    //  std::getline(in_stream, rd_line);
   }
 
   while(in_stream.good()){
     std::string rd_line;
     std::getline(in_stream, rd_line);
-    readStore.push_back(trim(rd_line));
+    std::string trimValue = trim(rd_line);
+    if(trimValue.length() > 0)
+      readStore.push_back(trimValue);
     if(!in_stream.good() ||
        in_stream.tellg() > (std::streamoff) offsetEnd)
       break;

@@ -576,7 +576,7 @@ int main(int argc, char** argv) {
       std::cout << "Timer started" << std::endl;
 
   runFSO(comm, positionFile, filenames, outPrefix, threshold);
-  // std::vector< std::pair<uint64_t, uint64_t> > read_pairs;
+  //std::vector< std::pair<uint64_t, uint64_t> > read_pairs;
   // compareOverLaps(comm, positionFile, read_pairs, threshold);
 
 
