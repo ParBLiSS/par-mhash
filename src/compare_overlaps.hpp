@@ -77,10 +77,35 @@ void loadPositionFile(const mxx::comm& comm,
 }
 
 template<typename T>
+void eliminateDuplicates(const mxx::comm& comm,
+                         std::vector<std::pair<T, T>>& truePairs){
+  // sort and eliminate duplicates
+  comm.with_subset(truePairs.begin() != truePairs.end(), [&](const mxx::comm& comm){
+      mxx::sort(truePairs.begin(), truePairs.end(), comm);
+      auto prevValue = mxx::right_shift(truePairs.back(), comm);
+      auto cItr = truePairs.begin();
+      auto vItr = cItr;
+      if(comm.rank() == 0 && cItr != truePairs.begin()){
+        prevValue = *cItr;
+        cItr++;
+      }
+      for(;cItr != truePairs.end();cItr++){
+        if(!(*cItr == prevValue)){
+          *vItr = *cItr; vItr++;
+          prevValue = *cItr;
+        }
+      }
+      auto nPairs = std::distance(truePairs.begin(), vItr);
+      truePairs.resize(nPairs);
+      std::vector< std::pair<T,T> >(truePairs).swap(truePairs);
+    });
+}
+
+template<typename T>
 void generateTruePairs(const mxx::comm& comm,
                        std::string positionFile,
                        uint32_t threshold,
-                       std::vector<std::pair<T, T>>& truePairs){
+                       std::vector< std::pair<T, T> >& truePairs){
   BL_BENCH_INIT(cmpr);
   BL_BENCH_START(cmpr);
   // load the position file
@@ -114,8 +139,8 @@ void generateTruePairs(const mxx::comm& comm,
   uint64_t startOffset, endOffset;
   auto posCompare = [&](const std::pair<T,T>& x,
                         const std::pair<T,T>& y){
-      return ((x.second > y.second) ?
-              (x.second - y.second) : (y.second - x.second)) < threshold;
+      return ((x.second > y.second) ? (x.second - y.second) :
+              (y.second - x.second)) < threshold;
   };
 
   std::vector<std::pair<T,T>> straddleRegion;
@@ -137,8 +162,98 @@ void generateTruePairs(const mxx::comm& comm,
   BL_BENCH_START(cmpr);
   findTruePairs(localRegion, truePairs, threshold);
   BL_BENCH_COLLECTIVE_END(cmpr, "true_pairs", truePairs.size(), comm);
+
+  BL_BENCH_START(cmpr);
+  eliminateDuplicates(comm, truePairs);
+  BL_BENCH_COLLECTIVE_END(cmpr, "unique_pairs", truePairs.size(), comm);
   BL_BENCH_REPORT_MPI_NAMED(cmpr, "cmpr_app", comm);
   return;
+}
+
+template<typename T>
+struct ReadPair{
+    T first, second;
+    char indicator;
+    bool operator==(const ReadPair& other){
+        return (first == other.first) &&
+            (second == other.second);
+    }
+};
+
+#define CMP_WRAP_TEMPLATE(...) __VA_ARGS__
+namespace mxx {
+    template <typename T>
+    MXX_CUSTOM_TEMPLATE_STRUCT(CMP_WRAP_TEMPLATE(ReadPair<T>), \
+                               first, second, indicator);
+}
+
+template<typename T>
+void computeSetDifference(const mxx::comm& comm,
+                          std::vector<std::pair<T, T>>& candidatePairs,
+                          std::vector<std::pair<T, T>>& truePairs){
+    BL_BENCH_INIT(cmpr);
+    BL_BENCH_START(cmpr);
+    uint64_t setDiff[2] = {0, 0};
+    uint64_t intersectPairs = 0;
+    comm.with_subset(
+      candidatePairs.size() + truePairs.size() > 0, [&](const mxx::comm& comm){
+          std::vector<ReadPair<T>> mergedPairs(candidatePairs.size() + truePairs.size());
+          auto rdItr = mergedPairs.begin();
+          for(auto px : candidatePairs){
+              rdItr->first = px.first; rdItr->second = px.second;
+              rdItr->indicator = 0; rdItr++;
+          }
+          for(auto px : truePairs){
+              rdItr->first = px.first; rdItr->second = px.second;
+              rdItr->indicator = 1; rdItr++;
+          }
+
+          mxx::sort(mergedPairs.begin(), mergedPairs.end(),
+                    [&](const ReadPair<T>& x, const ReadPair<T>& y){
+                        return (x.first < y.first) ||
+                            ((x.first == y.first) && (x.second < y.second));
+                    }, comm);
+
+          // assuming a pair can appear atmost once
+          auto curVal = mxx::right_shift(mergedPairs.back(), comm);
+          auto nextVal = mxx::left_shift(mergedPairs.back(), comm);
+          auto itrx = mergedPairs.begin();
+          if(comm.rank() == 0 && itrx != mergedPairs.end()){
+              curVal = *itrx; itrx++;
+          } else if( itrx != mergedPairs.end() ){
+              if(!(curVal == *itrx)){
+                  curVal = *itrx; itrx++;
+              }
+          }
+          for(; itrx != mergedPairs.end(); itrx++){
+              if(!(*itrx == curVal)){
+                  setDiff[curVal.indicator] += 1;
+                  curVal = *itrx;
+              } else {
+                  intersectPairs += 1; itrx++;
+                  if(itrx != mergedPairs.end())
+                      curVal = *itrx;
+                  else
+                      return;
+              }
+          }
+          if(comm.rank() < (comm.size() - 1)){
+              if(!(curVal == nextVal))
+                  setDiff[curVal.indicator] += 1;
+          } else { // TODO: verify this
+              setDiff[curVal.indicator] += 1;
+          }
+      });
+    auto inCandidates = mxx::allreduce(setDiff[0], comm);
+    auto inTruth = mxx::allreduce(setDiff[1], comm);
+    auto totalIntersect = mxx::allreduce(intersectPairs, comm);
+    if(comm.rank() == 0){
+        std::cout << "|CANDIDATES \\   TRUTH|  : " << inCandidates << std::endl;
+        std::cout << "|TRUTH \\   CANDIDATES|  : " << inTruth << std::endl;
+        std::cout << "|TRUTH \\cup CANDIDATES|  : " << totalIntersect << std::endl;
+    }
+    BL_BENCH_COLLECTIVE_END(cmpr, "count_setdiff", truePairs.size(), comm);
+    BL_BENCH_REPORT_MPI_NAMED(cmpr, "cmpr_app", comm);
 }
 
 template<typename T>
@@ -154,6 +269,9 @@ void compareOverLaps(const mxx::comm& comm,
     auto totalTruePairs = mxx::allreduce(truePairs.size(), comm);
     if(comm.rank() == 0)
        std::cout << "TRUE TOTAL : " << totalTruePairs << std::endl;
+
+    //
+    computeSetDifference(comm, candidatePairs, truePairs);
 }
 
 
