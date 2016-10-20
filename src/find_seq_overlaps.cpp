@@ -26,7 +26,7 @@
 /// Hash Function Seed Values
 #include "hash_seeds.hpp"
 
-const static std::size_t hash_block_size = 4;
+const static std::size_t hash_block_size = 5;
 static std::size_t hash_block_count = 250;
 static std::size_t hash_seeds_size;
 
@@ -269,7 +269,7 @@ struct SeqMinHashGenerator {
                 }
                 KmerType ckx = *it;
                 auto rcx = ckx.reverse_complement();
-                HashBlockType hx = hash_functions((*it < rcx) ? *it : rcx, seed_index);
+                HashBlockType hx = hash_functions((ckx < rcx) ? ckx : rcx, seed_index);
                 hrv.update_min(hx); // pick the minimum
             }
         } else {
@@ -294,9 +294,14 @@ uint64_t generatePairs(const mxx::comm& comm,
     // return nsize;
     for(auto outer_itr = start_itr; outer_itr != end_itr; outer_itr++){
         for(auto inner_itr = outer_itr + 1; inner_itr != end_itr; inner_itr++){
+            if(outer_itr->seq_id == inner_itr->seq_id) continue;
             // generate pair
-            read_pairs.push_back(std::make_pair(outer_itr->seq_id,
-                                                inner_itr->seq_id));
+            if(outer_itr->seq_id < inner_itr->seq_id)
+                read_pairs.push_back(std::make_pair(outer_itr->seq_id,
+                                                    inner_itr->seq_id));
+            else
+                read_pairs.push_back(std::make_pair(inner_itr->seq_id,
+                                                    outer_itr->seq_id));
         }
     }
     return nsize;
@@ -584,11 +589,16 @@ int main(int argc, char** argv) {
     for(auto fx : filenames) std::cout << fx << std::endl;
   }
 
-  auto availableSeeeds = sizeof(hash_seed_values);
-  availableSeeeds /= sizeof(hash_seed_values[0]);
-  if(availableSeeeds < (hash_block_size * hash_block_count)){
+  hash_seeds_size = (hash_block_size * hash_block_count);
+  auto availableSeeds = sizeof(hash_seed_values);
+  availableSeeds /= sizeof(hash_seed_values[0]);
+  if(comm.rank() == 0)
+       std::cout << "Available seeds : " << availableSeeds <<  std::endl;
+  if(availableSeeds < hash_seeds_size){
       if(comm.rank() == 0)
-          std::cout << "Not Enough seeds : " << std::endl;
+          std::cout << "Not Enough seeds : " 
+                    << availableSeeds << " < " << hash_seeds_size
+                    << std::endl;
       return 1;
   }
 

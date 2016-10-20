@@ -33,8 +33,13 @@ void findTruePairs (std::vector<std::pair<T,T> >& read_pos,
         assert(down > up);
         // gen pairs [up,down)
         for (std::size_t pos=up+1; pos < down; pos++) {
-            read_pairs.push_back(std::make_pair(read_pos[up].first,
-                                                read_pos[pos].first));
+            if(read_pos[up].first == read_pos[pos].first) continue;
+            if(read_pos[up].first < read_pos[pos].first)
+                read_pairs.push_back(std::make_pair(read_pos[up].first,
+                                                    read_pos[pos].first));
+            else
+                read_pairs.push_back(std::make_pair(read_pos[pos].first,
+                                                    read_pos[up].first));
         }
         up++;
     }
