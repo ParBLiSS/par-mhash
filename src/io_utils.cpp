@@ -6,8 +6,8 @@
 
 #include "mxx/comm.hpp"
 
-
 #include "io_utils.hpp"
+#include "run_cfg.hpp"
 
 // UTILITY FUNCTIONS -------------------------------------------------
 // trim taken from stack overflow
@@ -84,4 +84,20 @@ void read_block(const mxx::comm& comm,
        in_stream.tellg() > (std::streamoff) offsetEnd)
       break;
   }
+}
+
+
+uint64_t load_file_data(mxx::comm& comm,
+                        std::vector<std::string>& inFiles,
+                        std::vector<bliss::io::file_data>& file_data){
+  uint64_t total = 0;
+  for (auto fn : inFiles) {
+    if (comm.rank() == 0) printf("READING %s via posix\n", fn.c_str());
+
+    FileReaderType fobj(fn, KmerType::size + 1, comm);
+
+    file_data.push_back(fobj.read_file());
+    total += file_data.back().getRange().size();
+  }
+  return total;
 }

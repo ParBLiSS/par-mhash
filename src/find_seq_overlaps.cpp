@@ -23,65 +23,11 @@
 #include "io_utils.hpp"
 #include "compare_overlaps.hpp"
 
+/// Run configuration
+#include "run_cfg.hpp"
 /// Hash Function Seed Values
 #include "hash_seeds.hpp"
 
-const static std::size_t hash_block_size = 5;
-static std::size_t hash_block_count = 250;
-static std::size_t hash_seeds_size;
-
-#if (pDNA == 4)
-using Alphabet = bliss::common::DNA;
-#elif (pDNA == 5)
-using Alphabet = bliss::common::DNA5;
-#elif (pDNA == 16)
-using Alphabet = bliss::common::DNA16;
-#endif
-
-// constants
-#ifndef HASH_KMER_SIZE
-#define HASH_KMER_SIZE 31
-#endif
-
-
-#if (pPARSER == FASTQ)
-#define FileParser bliss::io::FASTQParser
-#elif (pPARSER == FASTA)
-#define FileParser bliss::io::FASTAParser
-#endif
-
-
-using FileReaderType = bliss::io::parallel::partitioned_file<
-  bliss::io::posix_file, FileParser>;
-
-// Kmer, FilerReader and Iterator data types
-using EdgeEncoding = Alphabet;
-using KmerType = bliss::common::Kmer<HASH_KMER_SIZE, Alphabet, WordType>;
-
-template <typename Iterator, template <typename> class SeqParser>
-using SeqIterType = bliss::io::SequencesIterator<Iterator, SeqParser>;
-
-template <typename Iter>
-using NonEOLIter = bliss::iterator::filter_iterator<bliss::utils::file::NotEOL, Iter>;
-
-uint64_t load_file_data(mxx::comm& comm,
-                        std::vector<std::string>& inFiles,
-                        std::vector<bliss::io::file_data>& file_data){
-    uint64_t total = 0;
-    for (auto fn : inFiles) {
-        if (comm.rank() == 0) printf("READING %s via posix\n", fn.c_str());
-
-        FileReaderType fobj(fn, KmerType::size + 1, comm);
-
-        file_data.push_back(fobj.read_file());
-        total += file_data.back().getRange().size();
-    }
-    return total;
-}
-
-// Hash Value types
-using HashValueType = uint64_t;
-using HashBlockType = std::array<HashValueType, hash_block_size>;
 
 //
 // @brief Kmer specialization for MurmurHash.  generated hash is 128 bit.
@@ -168,8 +114,6 @@ struct ReadMinHashBlock{
         }
     }
 };
-
-#define WRAP_TEMPLATE(...) __VA_ARGS__
 
 // defining your own type for structs which are non-templated
 // MXX_CUSTOM_STRUCT(ReadMinHashBlock, seq_id, hash_values);

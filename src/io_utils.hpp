@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <algorithm>
 
+#include "io/file.hpp"
 #include "mxx/comm.hpp"
 #include "mxx/shift.hpp"
 
@@ -22,6 +23,9 @@ void read_block(const mxx::comm& comm,
                 uint64_t offsetEnd,
                 std::vector<std::string>& readStore);
 
+uint64_t load_file_data(mxx::comm& comm,
+                        std::vector<std::string>& inFiles,
+                        std::vector<bliss::io::file_data>& file_data);
 
 // bug in mxx left_shift in specialization for std::vector
 template <typename T>
