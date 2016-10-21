@@ -83,6 +83,8 @@ using SpecialKeys = ::bliss::kmer::hash::sparsehash::special_keys<KmerType, true
 
 //using MapType = dsc::densehash_multimap<KmerType, ValType, MapParams, SpecialKeys>;
 using MapType = dsc::unordered_multimap<KmerType, ValType, MapParams>;
+//using MapType = dsc::unordered_multimap<KmerType, ValType, MapParams>;
+//using MapType = dsc::unordered_multimap_compact_vec<KmerType, ValType, MapParams>;
 
 
 /**
@@ -241,6 +243,9 @@ void constructIndex(mxx::comm& comm, bliss::io::file_data& file_data,
                     SeqIterType>(file_data, tmp, comm);
 
   //std::cout << tmp.size() << std::endl;
+  //if(comm.rank() == 0)
+  //    for(auto px : tmp)
+  //        std::cout << px << std::endl;
   seqIdx.insert(tmp);
 }
 
@@ -285,7 +290,7 @@ void runKSO(mxx::comm& comm,
     auto nLocalReads = getReadsCount(comm, file_data.back());
     readStartIndex = mxx::scan(nLocalReads, comm);
     if(nLocalReads > 0)
-        readStartIndex -= readStartIndex;
+        readStartIndex -= nLocalReads;
     SeqPositionIndexType seqIdx(comm);
     constructIndex(comm, file_data.back(), seqIdx);
     //auto txval = std::distance(seqIdx.get_map().get_local_container().begin(), seqIdx.get_map().get_local_container().end());
@@ -296,27 +301,30 @@ void runKSO(mxx::comm& comm,
 
     BL_BENCH_START(kfso);
     std::vector<std::pair<T, T>> read_pairs;
-    auto txval = std::distance(seqIdx.get_map().get_local_container().begin(),
-                               seqIdx.get_map().get_local_container().end());
+    auto local_begin = seqIdx.get_map().get_local_container().begin();
+    auto local_end = seqIdx.get_map().get_local_container().end();
+    auto txval = std::distance(local_begin, local_end);
     //std::size_t sum;
-    //txval = generatePairs(comm, seqIdx.get_map().get_local_container().begin(),
-    //                      seqIdx.get_map().get_local_container().end(),
-    //                      read_pairs);
+    txval = generatePairs(comm, local_begin, local_end, read_pairs);
 
     std::size_t csize = 0, max_size = 0;
-    auto rbv_itr = seqIdx.get_map().get_local_container().begin();
+    auto rbv_itr = local_begin;
     auto prev_rbv = rbv_itr;
 
-    for(;rbv_itr !=  seqIdx.get_map().get_local_container().end();rbv_itr++){
+    for(;rbv_itr !=  local_end;rbv_itr++){
+        //std::cout << *rbv_itr << std::endl;
         if((*rbv_itr).first == (*prev_rbv).first)
             continue;
         csize = generatePairs(comm, prev_rbv, rbv_itr, read_pairs);
         if(csize > max_size) max_size = csize;
         prev_rbv = rbv_itr;
     }
-    if(seqIdx.get_map().get_local_container().end() == rbv_itr && prev_rbv != rbv_itr)
-        csize = generatePairs(comm, prev_rbv, rbv_itr, read_pairs);
+    if(local_end == rbv_itr && prev_rbv != rbv_itr)
+         csize = generatePairs(comm, prev_rbv, rbv_itr, read_pairs);
     if(csize > max_size) max_size = csize;
+    //if(comm.rank() == 0)
+    //    for(auto px : read_pairs)
+    //        std::cout << px << std::endl;
 
     auto gen_pairs = mxx::allreduce(read_pairs.size(), comm);
     if(comm.rank() == 0)
