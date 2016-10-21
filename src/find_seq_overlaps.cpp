@@ -302,7 +302,11 @@ uint64_t generateOverlapReadPairs(const mxx::comm& comm,
 
     if(csize > max_size) max_size = csize;
     // return max_size;
-    // remove duplicates
+    auto rmax_size = mxx::allreduce(max_size, std::greater<std::size_t>(), comm);
+    if(comm.rank() == 0)
+      std::cout << "Maximum Size  : " << rmax_size << std::endl;
+
+   // remove duplicates
     comm.with_subset(read_pairs.begin() != read_pairs.end(), [&](const mxx::comm& comm){
         // sort read pairs
         mxx::sort(read_pairs.begin(), read_pairs.end(),
@@ -493,14 +497,13 @@ void parse_args(int argc, char **argv,
     // hash_block_size = blockSizeArg.getValue();
 
     if(comm.rank() == 0){
-      std::cout << "--------------------------------------" << std::endl;
       std::cout << "Position File   : " << positionFile << std::endl;
       std::cout << "Output File Pfx : " << outPrefix << std::endl;
       std::cout << "Input File      : " << filenames.front() << std::endl;
       std::cout << "Threshold       : " << threshold << std::endl;
       std::cout << "Block Size      : " << hash_block_size << std::endl;
       std::cout << "Block Count     : " << hash_block_count << std::endl;
-      std::cout << "--------------------------------------" << std::endl;
+      std::cout << "Kmer Length     : " << HASH_KMER_SIZE  << std::endl;
     }
 
   } catch (TCLAP::ArgException &e)  {
@@ -516,8 +519,10 @@ int main(int argc, char** argv) {
   mxx::env e(argc, argv); // MPI init
   mxx::comm comm;
 
+  if(comm.rank() == 0)
+    std::cout << "--------------------------------------" << std::endl;
   if (comm.rank() == 0)
-    std::cout << "EXECUTING " << std::string(argv[0]) << std::endl;
+    std::cout << "EXECUTABLE  : " << std::string(argv[0]) << std::endl;
 
 
   std::string positionFile;
@@ -529,9 +534,6 @@ int main(int argc, char** argv) {
   // parse arguments
   parse_args(argc, argv, comm,
              positionFile, filenames, outPrefix, threshold);
-  if(comm.rank() == 0 && filenames.size() > 0){
-    for(auto fx : filenames) std::cout << fx << std::endl;
-  }
 
   hash_seeds_size = (hash_block_size * hash_block_count);
   auto availableSeeds = sizeof(hash_seed_values);
@@ -550,9 +552,6 @@ int main(int argc, char** argv) {
   comm.barrier();
   auto start = std::chrono::steady_clock::now();
 
-  if(!comm.rank())
-      std::cout << "Timer started" << std::endl;
-
   runFSO(comm, positionFile, filenames, outPrefix, threshold);
   //std::vector< std::pair<uint64_t, uint64_t> > read_pairs;
   // compareOverLaps(comm, positionFile, read_pairs, threshold);
@@ -563,7 +562,9 @@ int main(int argc, char** argv) {
   auto elapsed_time  = std::chrono::duration<double, std::milli>(end - start).count();
 
   if(!comm.rank())
-      std::cout << "Time (ms) -> " << elapsed_time << std::endl;
+      std::cout << "Time (ms)  : " << elapsed_time << std::endl;
 
+  if(comm.rank() == 0)
+    std::cout << "--------------------------------------" << std::endl;
  // TODO: compute elapsed time
 }

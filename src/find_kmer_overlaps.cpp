@@ -289,11 +289,12 @@ void runKSO(mxx::comm& comm,
     SeqPositionIndexType seqIdx(comm);
     constructIndex(comm, file_data.back(), seqIdx);
     //auto txval = std::distance(seqIdx.get_map().get_local_container().begin(), seqIdx.get_map().get_local_container().end());
+    BL_BENCH_COLLECTIVE_END(kfso, "build_index", read_pairs.size(), comm);
     auto rval = mxx::allreduce(seqIdx.size(), comm);
     if(comm.rank() == 0)
-        std::cout << "TEST : " << rval << std::endl;
-    BL_BENCH_COLLECTIVE_END(kfso, "build_index", read_pairs.size(), comm);
+        std::cout << "Index Size  : " << rval << std::endl;
 
+    BL_BENCH_START(kfso);
     std::vector<std::pair<T, T>> read_pairs;
     auto txval = std::distance(seqIdx.get_map().get_local_container().begin(),
                                seqIdx.get_map().get_local_container().end());
@@ -318,6 +319,9 @@ void runKSO(mxx::comm& comm,
     if(csize > max_size) max_size = csize;
     mxx::sort(read_pairs.begin(), read_pairs.end(), comm);
     BL_BENCH_COLLECTIVE_END(kfso, "generate_pairs", read_pairs.size(), comm);
+    auto rmax_size = mxx::allreduce(max_size, std::greater<std::size_t>(), comm);
+    if(comm.rank() == 0)
+        std::cout << "Maximum Size  : " << rmax_size << std::endl;
 
     BL_BENCH_START(kfso);
     compareOverLaps(comm, positionFile, read_pairs, threshold);
@@ -372,12 +376,10 @@ void parse_args(int argc, char **argv,
     threshold = threshArg.getValue();
 
     if(comm.rank() == 0){
-      std::cout << "--------------------------------------" << std::endl;
       std::cout << "Position File   : " << positionFile << std::endl;
       std::cout << "Output File Pfx : " << outPrefix << std::endl;
       std::cout << "Input File      : " << filenames.front() << std::endl;
       std::cout << "Threshold       : " << threshold << std::endl;
-      std::cout << "--------------------------------------" << std::endl;
     }
 
   } catch (TCLAP::ArgException &e)  {
@@ -393,8 +395,10 @@ int main(int argc, char** argv) {
   mxx::env e(argc, argv); // MPI init
   mxx::comm comm;
 
-  if (comm.rank() == 0)
-    std::cout << "EXECUTING " << std::string(argv[0]) << std::endl;
+  if (comm.rank() == 0) {
+      std::cout << "--------------------------------------" << std::endl;
+      std::cout << "EXECUTING : " << std::string(argv[0]) << std::endl;
+  }
 
 
   std::string positionFile;
@@ -413,14 +417,14 @@ int main(int argc, char** argv) {
   comm.barrier();
   auto start = std::chrono::steady_clock::now();
 
-  if(!comm.rank())
-      std::cout << "Timer started" << std::endl;
-
   runKSO(comm, positionFile, filenames, outPrefix, threshold);
+
   comm.barrier();
   auto end = std::chrono::steady_clock::now();
   auto elapsed_time  = std::chrono::duration<double, std::milli>(end - start).count();
 
-  if(!comm.rank())
-      std::cout << "Time (ms) -> " << elapsed_time << std::endl;
+  if(!comm.rank()){
+      std::cout << "Time (ms) -> : " << elapsed_time << std::endl;
+      std::cout << "--------------------------------------" << std::endl;
+  }
 }
