@@ -307,31 +307,8 @@ uint64_t generateOverlapReadPairs(const mxx::comm& comm,
       std::cout << "Maximum Size  : " << rmax_size << std::endl;
 
    // remove duplicates
-    comm.with_subset(read_pairs.begin() != read_pairs.end(), [&](const mxx::comm& comm){
-        // sort read pairs
-        mxx::sort(read_pairs.begin(), read_pairs.end(),
-                  [&](const std::pair<ReadIdType, ReadIdType> x,
-                      const std::pair<ReadIdType, ReadIdType> y){
-                    return (x < y);
-                  }, comm);
+    eliminateDuplicates(comm, read_pairs);
 
-        auto prevPair = mxx::right_shift(read_pairs.back(), comm);
-        if(comm.rank() == 0)
-          prevPair = std::make_pair((ReadIdType) std::numeric_limits<ReadIdType>::max(),
-                                    (ReadIdType) std::numeric_limits<ReadIdType>::max());
-        auto cur_itr = read_pairs.begin();
-        auto upd_itr = cur_itr;
-        while(cur_itr != read_pairs.end()){
-          if(*cur_itr != prevPair){
-            *upd_itr = *cur_itr;
-            upd_itr++;
-          }
-          prevPair = *cur_itr;
-          cur_itr++;
-        }
-        auto psize = std::distance(read_pairs.begin(), upd_itr);
-        read_pairs.resize(psize);
-      });
     return read_pairs.size();
 }
 

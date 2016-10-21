@@ -92,26 +92,26 @@ void loadPositionFile(const mxx::comm& comm,
 
 template<typename T>
 void eliminateDuplicates(const mxx::comm& comm,
-                         std::vector<std::pair<T, T>>& truePairs){
+                         std::vector<std::pair<T, T>>& readIdPairs){
   // sort and eliminate duplicates
-  comm.with_subset(truePairs.begin() != truePairs.end(), [&](const mxx::comm& comm){
-      mxx::sort(truePairs.begin(), truePairs.end(), comm);
-      auto prevValue = mxx::right_shift(truePairs.back(), comm);
-      auto cItr = truePairs.begin();
+  comm.with_subset(readIdPairs.begin() != readIdPairs.end(), [&](const mxx::comm& comm){
+      mxx::sort(readIdPairs.begin(), readIdPairs.end(), comm);
+      auto prevValue = mxx::right_shift(readIdPairs.back(), comm);
+      auto cItr = readIdPairs.begin();
       auto vItr = cItr;
-      if(comm.rank() == 0 && cItr != truePairs.begin()){
+      if(comm.rank() == 0 && cItr != readIdPairs.end()){
         prevValue = *cItr;
         cItr++;
       }
-      for(;cItr != truePairs.end();cItr++){
+      for(;cItr != readIdPairs.end();cItr++){
         if(!(*cItr == prevValue)){
           *vItr = *cItr; vItr++;
           prevValue = *cItr;
         }
       }
-      auto nPairs = std::distance(truePairs.begin(), vItr);
-      truePairs.resize(nPairs);
-      std::vector< std::pair<T,T> >(truePairs).swap(truePairs);
+      auto nPairs = std::distance(readIdPairs.begin(), vItr);
+      readIdPairs.resize(nPairs);
+      std::vector< std::pair<T,T> >(readIdPairs).swap(readIdPairs);
     });
 }
 

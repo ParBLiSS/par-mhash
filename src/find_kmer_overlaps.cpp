@@ -317,8 +317,15 @@ void runKSO(mxx::comm& comm,
     if(seqIdx.get_map().get_local_container().end() == rbv_itr && prev_rbv != rbv_itr)
         csize = generatePairs(comm, prev_rbv, rbv_itr, read_pairs);
     if(csize > max_size) max_size = csize;
-    mxx::sort(read_pairs.begin(), read_pairs.end(), comm);
+
+    auto gen_pairs = mxx::allreduce(read_pairs.size(), comm);
+    if(comm.rank() == 0)
+        std::cout << "Total Gen Pairs : " << gen_pairs << std::endl;
+    eliminateDuplicates(comm, read_pairs);
     BL_BENCH_COLLECTIVE_END(kfso, "generate_pairs", read_pairs.size(), comm);
+    gen_pairs = mxx::allreduce(read_pairs.size(), comm);
+    if(comm.rank() == 0)
+        std::cout << "Unique Gen Pairs : " << gen_pairs << std::endl;
     auto rmax_size = mxx::allreduce(max_size, std::greater<std::size_t>(), comm);
     if(comm.rank() == 0)
         std::cout << "Maximum Size  : " << rmax_size << std::endl;
