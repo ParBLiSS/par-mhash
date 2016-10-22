@@ -310,7 +310,21 @@ void runKSO(mxx::comm& comm,
     std::size_t csize = 0, max_size = 0;
     auto rbv_itr = local_begin;
     auto prev_rbv = rbv_itr;
+    for(;rbv_itr !=  local_end;rbv_itr++){
+        //std::cout << *rbv_itr << std::endl;
+        if((*rbv_itr).first == (*prev_rbv).first)
+            continue;
+        csize = std::distance(prev_rbv, rbv_itr);
+        if(csize > max_size) max_size = csize;
+        prev_rbv = rbv_itr;
+    }
+    csize = std::distance(prev_rbv, rbv_itr);
+    if(csize > max_size) max_size = csize;
+    auto rmax_size = mxx::allreduce(max_size, std::greater<std::size_t>(), comm);
+    if(comm.rank() == 0)
+        std::cout << "Maximum Size  : " << rmax_size << std::endl;
 
+    rbv_itr = local_begin; prev_rbv = rbv_itr;
     for(;rbv_itr !=  local_end;rbv_itr++){
         //std::cout << *rbv_itr << std::endl;
         if((*rbv_itr).first == (*prev_rbv).first)
@@ -334,7 +348,7 @@ void runKSO(mxx::comm& comm,
     gen_pairs = mxx::allreduce(read_pairs.size(), comm);
     if(comm.rank() == 0)
         std::cout << "Unique Gen Pairs : " << gen_pairs << std::endl;
-    auto rmax_size = mxx::allreduce(max_size, std::greater<std::size_t>(), comm);
+     rmax_size = mxx::allreduce(max_size, std::greater<std::size_t>(), comm);
     if(comm.rank() == 0)
         std::cout << "Maximum Size  : " << rmax_size << std::endl;
 
