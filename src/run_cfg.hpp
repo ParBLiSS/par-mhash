@@ -11,7 +11,7 @@
 #include "io/filtered_sequence_iterator.hpp"
 #include "utils/file_utils.hpp"
 
-const static std::size_t hash_block_size = 5;
+const static std::size_t hash_block_size = 4;
 static std::size_t hash_block_count = 250;
 static std::size_t hash_seeds_size;
 
@@ -25,7 +25,7 @@ using Alphabet = bliss::common::DNA16;
 
 // constants
 #ifndef HASH_KMER_SIZE
-#define HASH_KMER_SIZE 31
+#define HASH_KMER_SIZE 21
 #endif
 
 

@@ -49,8 +49,33 @@ void compute_offsets(const mxx::comm& comm,
   std::ifstream fin(inFileName.c_str());
   fin.seekg(0,std::ios::end);
   auto fileSize = fin.tellg();
-  offsetStart = (fileSize/comm.size()) * comm.rank();
-  offsetEnd = (fileSize/comm.size()) * (comm.rank() + 1);
+  //uint64_t tmp = (fileSize/((uint64_t)comm.size())) * (((uint64_t)comm.rank()) + 1);
+  uint64_t tmp = block_high(comm.rank(), comm.size(), fileSize);
+  fin.seekg(tmp, std::ios::beg);
+  if(comm.rank() == (comm.size() - 1)){
+    tmp = fileSize;
+  } else {
+    std::string rd_line;
+    std::getline(fin, rd_line);
+    tmp = fin.tellg();
+    //tmp += 1;
+  }
+  offsetEnd = tmp;
+  uint64_t tmp2 = mxx::right_shift(tmp, comm);
+  if(comm.rank() == 0)
+    offsetStart = 0;
+  else
+    offsetStart = tmp2;
+  //offsetStart = block_low(comm.size(), comm.rank(), fileSize);
+  //offsetEnd = block_high(comm.size(), comm.rank() + 1, fileSize);
+  
+}
+
+std::size_t get_file_size(std::string inFileName){
+  std::ifstream fin(inFileName.c_str());
+  fin.seekg(0,std::ios::end);
+  auto fileSize = fin.tellg();
+  return fileSize;
 }
 
 
@@ -60,20 +85,14 @@ void read_block(const mxx::comm& comm,
                 uint64_t offsetEnd,
                 std::vector<std::string>& readStore){
 
-
   std::ifstream in_stream(inFileName.c_str());
   in_stream.seekg(offsetStart,std::ios::beg);
 
-  // ignore first line, will be read by rank+1
-  if(comm.rank() > 0 && in_stream.good()){
-    std::string rd_line;
-    std::getline(in_stream, rd_line);
-    // std::cout << "RX : " << rd_line << std::endl;
-    // right on the new line character, then read another line
-    //if(trim(rd_line).length() > 0 && in_stream.good())
-    //  std::getline(in_stream, rd_line);
+  if(comm.rank() > 0){
+      std::string rd_line;
+      std::getline(in_stream, rd_line);
   }
-
+  
   while(in_stream.good()){
     std::string rd_line;
     std::getline(in_stream, rd_line);
@@ -84,6 +103,9 @@ void read_block(const mxx::comm& comm,
        in_stream.tellg() > (std::streamoff) offsetEnd)
       break;
   }
+  // auto totalPosLines = mxx::allreduce(readStore.size(), comm);
+  // if(comm.rank() == 0)
+  //    std::cout << "RDBLOCK TOTAL : " << totalPosLines << std::endl;
 }
 
 
