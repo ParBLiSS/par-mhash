@@ -477,10 +477,6 @@ void runFSO(mxx::comm& comm,
   auto end = std::chrono::steady_clock::now();
   auto elapsed_time  = std::chrono::duration<double, std::milli>(end - start).count();
 
-  comm.barrier();
-  auto end = std::chrono::steady_clock::now();
-  auto elapsed_time  = std::chrono::duration<double, std::milli>(end - start).count();
-
   if(!comm.rank())
       std::cout << "PGEN TIME (ms)  : " << elapsed_time << std::endl;
   BL_BENCH_REPORT_MPI_NAMED(rfso, "rfso_app", comm);
