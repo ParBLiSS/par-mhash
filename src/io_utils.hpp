@@ -12,6 +12,7 @@
 #include "mxx/comm.hpp"
 #include "mxx/shift.hpp"
 
+std::size_t get_file_size(std::string inFileName);
 void compute_offsets(const mxx::comm& comm,
                      std::string inFileName,
                      uint64_t& offsetStart,
@@ -27,6 +28,31 @@ uint64_t load_file_data(mxx::comm& comm,
                         std::vector<std::string>& inFiles,
                         std::vector<bliss::io::file_data>& file_data);
 
+template<typename SizeType, typename T>
+static inline SizeType block_low(T rank,  T nproc,
+                                 SizeType n){
+    return (((SizeType)rank) * n) / ((SizeType)nproc);
+}
+
+template<typename SizeType, typename T>
+static inline SizeType block_high(T rank, T nproc,
+                                  SizeType n){
+    return ((((SizeType)(rank + 1)) * n) / ((SizeType)nproc)) - 1;
+    //return (((rank + 1) * n) / nproc) - 1;
+}
+
+template<typename SizeType, typename T>
+static inline SizeType block_size(T rank, T nproc,
+                                  SizeType n){
+    return block_low<SizeType, T>(rank + 1, nproc, n)
+        - block_low<SizeType, T>(rank, nproc, n);
+}
+
+template<typename SizeType, typename T>
+static inline T block_owner(SizeType j, SizeType n,
+                            T nproc){
+    return (((nproc) * ((j) + 1) - 1) / (n));
+}
 // bug in mxx left_shift in specialization for std::vector
 template <typename T>
 std::vector<T> mxx_left_shift(const std::vector<T>& v, const mxx::comm& comm = mxx::comm())

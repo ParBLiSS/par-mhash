@@ -11,6 +11,7 @@
 
 #include "io_utils.hpp"
 
+
 template <typename T>
 void findTruePairs (std::vector<std::pair<T,T> >& read_pos,
                     std::vector<std::pair<T,T> >& read_pairs,
@@ -47,50 +48,6 @@ void findTruePairs (std::vector<std::pair<T,T> >& read_pos,
 
 
 template<typename T>
-void loadPositionFile(const mxx::comm& comm,
-                      std::string positionFile,
-                      std::vector<std::pair<T, T>>& readPairs){
-
-  // compute start and end offsets corresponding this rank
-  T offsetStart, offsetEnd;
-  compute_offsets(comm, positionFile, offsetStart, offsetEnd);
-
-  // load the block
-  std::vector<std::string> bufferStore;
-  read_block(comm, positionFile, offsetStart, offsetEnd, bufferStore);
-  // for(int i = 0; i < comm.size();i++){
-  //     comm.barrier();
-  //     if(comm.rank() == i){
-  //         std::cout << i << " BF TOTAL : " << bufferStore.size() << std::endl;
-  //         for(auto rx : bufferStore)
-  //             std::cout << "[" << rx << "]" << std::endl;
-  //     }
-  //     comm.barrier();
-  // }
-
-  // generate the pairs
-  // input position file has format for paired end reads:
-  // position_left_end position_right_end
-  readPairs.resize(2 * bufferStore.size());
-  auto startIdx = mxx::scan(bufferStore.size(), comm);
-  auto nRecords = mxx::allreduce(bufferStore.size(), comm);
-  if(bufferStore.size() > 0)
-    startIdx = startIdx - bufferStore.size();
-  auto rpItr = readPairs.begin();
-  for(auto rcd : bufferStore){
-    T inValue;
-    std::stringstream strStream(rcd);
-    strStream >> inValue;
-    *rpItr = std::make_pair(startIdx, inValue);
-    rpItr++;
-    strStream >> inValue;
-    *rpItr = std::make_pair(startIdx + nRecords, inValue);
-    rpItr++; startIdx++;
-  }
-
-}
-
-template<typename T>
 void eliminateDuplicates(const mxx::comm& comm,
                          std::vector<std::pair<T, T>>& readIdPairs){
   // sort and eliminate duplicates
@@ -116,6 +73,48 @@ void eliminateDuplicates(const mxx::comm& comm,
 }
 
 template<typename T>
+void loadPositionFile(const mxx::comm& comm,
+                      std::string positionFile,
+                      std::vector<std::pair<T, T>>& readPairs){
+
+  // compute start and end offsets corresponding this rank
+  T offsetStart, offsetEnd;
+  compute_offsets(comm, positionFile, offsetStart, offsetEnd);
+
+  // load the block
+  std::vector<std::string> bufferStore ;
+  read_block(comm, positionFile, offsetStart, offsetEnd, bufferStore);
+  auto totalPosLines = mxx::allreduce(bufferStore.size(), comm);
+  if(comm.rank() == 0)
+      std::cout << "POS FILE RECORDS : " << totalPosLines << std::endl;
+  auto vx = mxx::left_shift(bufferStore.front(), comm);
+  
+  // generate the pairs
+  // input position file has format for paired end reads:
+  // position_left_end position_right_end
+  readPairs.resize(2 * bufferStore.size());
+  auto startIdx = mxx::scan(bufferStore.size(), comm);
+  auto nRecords = mxx::allreduce(bufferStore.size(), comm);
+  if(bufferStore.size() > 0)
+    startIdx = startIdx - bufferStore.size();
+  auto rpItr = readPairs.begin();
+  for(auto rcd : bufferStore){
+    T inValue;
+    std::stringstream strStream(rcd);
+    strStream >> inValue;
+    *rpItr = std::make_pair(startIdx, inValue);
+    rpItr++;
+    strStream >> inValue;
+    *rpItr = std::make_pair(startIdx + nRecords, inValue);
+    rpItr++; startIdx++;
+  }
+
+  totalPosLines = mxx::allreduce(readPairs.size(), comm);
+  if(comm.rank() == 0)
+     std::cout << "POS DATA : " << totalPosLines << std::endl;
+}
+
+template<typename T>
 void generateTruePairs(const mxx::comm& comm,
                        std::string positionFile,
                        uint32_t threshold,
@@ -126,6 +125,7 @@ void generateTruePairs(const mxx::comm& comm,
   std::vector<std::pair<T, T>> readPosPairs;
   loadPositionFile(comm, positionFile, readPosPairs);
   BL_BENCH_COLLECTIVE_END(cmpr, "load_pos", readPosPairs.size(), comm);
+  auto totalPosLines = mxx::allreduce(readPosPairs.size(), comm);
 
   // sort by positionFile
   BL_BENCH_START(cmpr);
@@ -141,17 +141,9 @@ void generateTruePairs(const mxx::comm& comm,
   auto totalPosPairs = mxx::allreduce(readPosPairs.size(), comm);
   if(comm.rank() == 0)
      std::cout << "POS TOTAL : " << totalPosPairs << std::endl;
-  // for(int i = 0; i < comm.size();i++){
-  //     comm.barrier();
-  //     if(comm.rank() == i){
-  //         std::cout << i << " RP TOTAL : " << readPosPairs.size() << std::endl;
-  //         for(auto rx : readPosPairs)
-  //             std::cout << "" << rx << std::endl;
-  //     }
-  //     comm.barrier();
-  // }
 
   BL_BENCH_START(cmpr);
+
   // get the straddling region
   uint64_t startOffset, endOffset;
   auto posCompare = [&](const std::pair<T,T>& x,
@@ -184,17 +176,6 @@ void generateTruePairs(const mxx::comm& comm,
   eliminateDuplicates(comm, truePairs);
   BL_BENCH_COLLECTIVE_END(cmpr, "unique_pairs", truePairs.size(), comm);
   BL_BENCH_REPORT_MPI_NAMED(cmpr, "cmpr_app", comm);
-  // for(int i = 0; i < comm.size(); i++){
-  //     comm.barrier();
-  //     if(comm.rank() == i) {
-  //         std::cout << i << " : LR TOTAL : " << truePairs.size() << std::endl;
-  //         for(auto rx : truePairs)
-  //             std::cout << "" << rx << std::endl;
-  //     }
-  //     comm.barrier();
-  // }
-
-  // return;
 }
 
 template<typename T>
@@ -280,11 +261,11 @@ void computeSetDifference(const mxx::comm& comm,
         fnRatio /= (float)(inTruth + totalIntersect);
         fpRatio = (float) inCandidates;
         fpRatio /= (float)(totalIntersect);
-        std::cout << "|CANDIDATES \\   TRUTH|  : " << inCandidates << std::endl;
-        std::cout << "|TRUTH \\   CANDIDATES|  : " << inTruth << std::endl;
-        std::cout << "|TRUTH \\cup CANDIDATES|  : " << totalIntersect << std::endl;
-        std::cout << "FN Ratio : "  << fnRatio << std::endl;
-        std::cout << "FP Ratio : "  << fpRatio << std::endl;
+        std::cout << "|CANDIDATES \\   TRUTH|  : " << inCandidates;
+        std::cout << " |TRUTH \\   CANDIDATES|  : " << inTruth;
+        std::cout << " |TRUTH \\cup CANDIDATES|  : " << totalIntersect;
+        std::cout << " FN Ratio : "  << fnRatio;
+        std::cout << " FP Ratio : "  << fpRatio << std::endl;
     }
     BL_BENCH_COLLECTIVE_END(cmpr, "count_setdiff", truePairs.size(), comm);
     BL_BENCH_REPORT_MPI_NAMED(cmpr, "cmpr_app", comm);

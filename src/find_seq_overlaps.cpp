@@ -28,6 +28,8 @@
 /// Hash Function Seed Values
 #include "hash_seeds.hpp"
 
+static uint64_t total_blocks = 0;
+static uint64_t processed_blocks = 0;
 
 //
 // @brief Kmer specialization for MurmurHash.  generated hash is 128 bit.
@@ -241,6 +243,7 @@ uint64_t generatePairs(const mxx::comm& comm,
     for(auto outer_itr = start_itr; outer_itr != end_itr; outer_itr++){
         for(auto inner_itr = outer_itr + 1; inner_itr != end_itr; inner_itr++){
             if(outer_itr->seq_id == inner_itr->seq_id) continue;
+            //nsize += 1; continue;
             // generate pair
             if(outer_itr->seq_id < inner_itr->seq_id)
                 read_pairs.push_back(std::make_pair(outer_itr->seq_id,
@@ -254,14 +257,36 @@ uint64_t generatePairs(const mxx::comm& comm,
     return nsize;
 }
 
+template<typename T=uint64_t>
+void eliminateLocalDupes(std::vector< std::pair<T, T> >& readIdPairs){
+      if(readIdPairs.size () == 0) return;
+      std::sort(readIdPairs.begin(), readIdPairs.end());
+      auto cItr = readIdPairs.begin();
+      auto vItr = cItr;
+      std::pair<T,T> prevValue;
+      if(cItr != readIdPairs.end()){
+        prevValue = *cItr;
+        cItr++;
+      }
+      for(;cItr != readIdPairs.end();cItr++){
+        if(!(*cItr == prevValue)){
+          *vItr = *cItr; vItr++;
+          prevValue = *cItr;
+        }
+      }
+      auto nPairs = std::distance(readIdPairs.begin(), vItr);
+      readIdPairs.resize(nPairs);
+      std::vector< std::pair<T,T> >(readIdPairs).swap(readIdPairs);
+}
 
 template<typename BVT, typename ReadIdType=uint64_t>
 uint64_t generateOverlapReadPairs(const mxx::comm& comm,
                               std::vector<BVT>&  local_rhpairs,
                               std::vector< std::pair<ReadIdType, ReadIdType> >& read_pairs){
+    static std::size_t size_tnow = 0;
+    static std::size_t px_idx = 0;
     std::size_t start_offset, end_offset;
     std::vector<BVT> straddle_region;
-    //if((*rvx_itr).hash_values != lastv.hash_values)
 
     // shift straddling
     shiftStraddlingRegion(comm, local_rhpairs, start_offset, end_offset,
@@ -269,49 +294,73 @@ uint64_t generateOverlapReadPairs(const mxx::comm& comm,
                           [&](const BVT& x, const BVT& y){
                               return (x.hash_values == y.hash_values);
                           });
+    bool lFlag = true;
+    std::size_t isIn = 1;
     if(local_rhpairs.size() > 0 && start_offset >= local_rhpairs.size()){
-        std::cout << "ERROR : start offset beyond size!!!" << std::endl;
-        exit(1);
+        //std::cout << comm.rank() 
+        //          << " ERROR : start offset beyond size!!!" << std::endl;
+        isIn = 0; 
     }
     if(local_rhpairs.size() > 0 && end_offset > local_rhpairs.size()){
-        std::cout << "ERROR : end offset beyond size!!!" << std::endl;
-        exit(1);
+        //std::cout << comm.rank() 
+        //          << "ERROR : end offset beyond size!!!" << std::endl;
+        isIn = 0; 
     }
     if(start_offset > end_offset){
-        std::cout << "ERROR : start offset > end offset!!!" << std::endl;
-        exit(1);
+        //std::cout << comm.rank() 
+        //          << "ERROR : start offset > end offset!!!" << std::endl;
+        isIn = 0; 
     }
-    // generate pairs
-    auto csize = generatePairs(comm,
-                               straddle_region.begin(),
-                               straddle_region.end(),
-                               read_pairs);
-    auto max_size = csize;
-    auto rbv_itr = local_rhpairs.begin() + start_offset;
-    auto prev_rbv = rbv_itr;
+    std::size_t max_size, sub_size;
+    sub_size = mxx::allreduce(isIn, comm);
+    comm.with_subset((isIn == 1), [&](const mxx::comm& comm){
+      auto csize = generatePairs(comm,
+                                 straddle_region.begin(),
+                                 straddle_region.end(),
+                                 read_pairs);
+      max_size = csize;
+      // TODO: redistribute the rest of the region equally 
+      // among all the processors
+      auto rbv_itr = local_rhpairs.begin() + start_offset;
+      auto prev_rbv = rbv_itr;
 
-    for(;(rbv_itr != local_rhpairs.begin() + end_offset) &&
-         (rbv_itr != local_rhpairs.end());
-        rbv_itr++){
-        if((*rbv_itr).hash_values == (*prev_rbv).hash_values)
-            continue;
-        csize = generatePairs(comm, prev_rbv, rbv_itr, read_pairs);
-        if(csize > max_size) max_size = csize;
-        prev_rbv = rbv_itr;
-    }
-    if(local_rhpairs.end() != rbv_itr && 
-       rbv_itr == local_rhpairs.begin() + end_offset && prev_rbv != rbv_itr)
-        csize = generatePairs(comm, prev_rbv, rbv_itr, read_pairs);
+      for(;(rbv_itr != local_rhpairs.begin() + end_offset) &&
+           (rbv_itr != local_rhpairs.end());
+          rbv_itr++){
+          if((*rbv_itr).hash_values == (*prev_rbv).hash_values)
+              continue;
+          csize = generatePairs(comm, prev_rbv, rbv_itr, read_pairs);
+          if(csize > max_size) max_size = csize;
+          prev_rbv = rbv_itr;
+      }
+      if(local_rhpairs.end() != rbv_itr && 
+         rbv_itr == local_rhpairs.begin() + end_offset && prev_rbv != rbv_itr)
+          csize = generatePairs(comm, prev_rbv, rbv_itr, read_pairs);
 
-    if(csize > max_size) max_size = csize;
     // return max_size;
     // auto rmax_size = mxx::allreduce(max_size, std::greater<std::size_t>(), comm);
     // if(comm.rank() == 0)
     //   std::cout << "Maximum Size  : " << rmax_size << std::endl;
+      // remove local duplicates
+      eliminateLocalDupes(read_pairs);
+      if(csize > max_size) max_size = csize;
 
-   // remove duplicates
+      // read_pairs.clear();
+      // std::vector< std::pair<ReadIdType,ReadIdType> >().swap(read_pairs);
+    });
+    auto rmax_size = mxx::allreduce(max_size, std::greater<std::size_t>(), comm);
+    auto total_size = mxx::allreduce(read_pairs.size(), comm);
+    // size_tnow += total_size;
+    if(comm.rank() == 0){
+        std::cout << px_idx << " : SUB COMM SIZE : " << sub_size;
+       std::cout << " : MAX BUCKET : " << rmax_size ;
+       std::cout << " : TOTAL PAIRS : " << total_size ;
+    }
     eliminateDuplicates(comm, read_pairs);
-
+    total_size = mxx::allreduce(read_pairs.size(), comm);
+    if(comm.rank() == 0)
+       std::cout << " : UNQ PAIRS : " << total_size << std::endl;
+    px_idx += 1;
     return read_pairs.size();
 }
 
@@ -364,9 +413,9 @@ void generateSequencePairs(mxx::comm& comm,
                 return false;
             }, comm);
   BL_BENCH_COLLECTIVE_END(genpr, "sort_records", local_rhpairs.size(), comm);
-  auto total_pairs = mxx::allreduce(local_rhpairs.size());
-  //if(comm.rank()  == 0)
-  //    std::cout << "TOTAL RH Pairs : " << total_pairs << std::endl;
+  // auto total_pairs = mxx::allreduce(local_rhpairs.size());
+  // if(comm.rank()  == 0)
+  //    std::cout << "FINAL PAIR CNT : " << total_pairs << std::endl;
 
   BL_BENCH_START(genpr);
   uint64_t max_block_size = 0;
@@ -376,7 +425,7 @@ void generateSequencePairs(mxx::comm& comm,
           generateOverlapReadPairs(comm, local_rhpairs, read_pairs);
       });
   BL_BENCH_COLLECTIVE_END(genpr, "pair_gen", max_block_size, comm);
-  //BL_BENCH_REPORT_MPI_NAMED(genpr, "genpair", comm);
+  BL_BENCH_REPORT_MPI_NAMED(genpr, "genpair", comm);
 }
 
 template<typename T=uint64_t>
@@ -411,19 +460,29 @@ void runFSO(mxx::comm& comm,
 
   auto totalHashPairs = mxx::allreduce(read_pairs.size());
   if(comm.rank()  == 0)
-      std::cout << "TOTAL Hash Pairs : " << totalHashPairs << std::endl;
+      std::cout << "FINAL PAIR COUNT : " << totalHashPairs << std::endl;
+  std::vector<bliss::io::file_data>().swap(file_data);
 
 
   BL_BENCH_START(rfso);
+  if(comm.rank() == 0){
+      std::cout << " Threshold       : " << threshold 
+                << " Block Size      : " << hash_block_size 
+                << " Block Count     : " << hash_block_count
+                << " Kmer Length     : " << HASH_KMER_SIZE  << std::endl;
+  }
   compareOverLaps(comm, positionFile, read_pairs, threshold);
   BL_BENCH_COLLECTIVE_END(rfso, "compare_overlaps", read_pairs.size(), comm);
+  comm.barrier();
+  auto end = std::chrono::steady_clock::now();
+  auto elapsed_time  = std::chrono::duration<double, std::milli>(end - start).count();
 
   comm.barrier();
   auto end = std::chrono::steady_clock::now();
   auto elapsed_time  = std::chrono::duration<double, std::milli>(end - start).count();
 
   if(!comm.rank())
-      std::cout << "Pair Time (ms)  : " << elapsed_time << std::endl;
+      std::cout << "PGEN TIME (ms)  : " << elapsed_time << std::endl;
   BL_BENCH_REPORT_MPI_NAMED(rfso, "rfso_app", comm);
 }
 
@@ -518,7 +577,8 @@ int main(int argc, char** argv) {
   std::string outPrefix;
   uint32_t threshold;
   outPrefix.assign("./output");
-
+  total_blocks = 0;
+  processed_blocks = 0;
   // parse arguments
   parse_args(argc, argv, comm,
              positionFile, filenames, outPrefix, threshold);
@@ -542,17 +602,22 @@ int main(int argc, char** argv) {
 
   runFSO(comm, positionFile, filenames, outPrefix, threshold);
   //std::vector< std::pair<uint64_t, uint64_t> > read_pairs;
-  // compareOverLaps(comm, positionFile, read_pairs, threshold);
+  //compareOverLaps(comm, positionFile, read_pairs, threshold);
 
 
   comm.barrier();
   auto end = std::chrono::steady_clock::now();
   auto elapsed_time  = std::chrono::duration<double, std::milli>(end - start).count();
 
+  auto atx = mxx::allreduce(total_blocks, comm);
+  auto ptx = mxx::allreduce(processed_blocks, comm);
+  if(!comm.rank()){
+    std::cout << "TOTAL BLOCKS : " << atx 
+              << " : PROCESSED BLOCKS : " << ptx << std::endl;
+  }
   if(!comm.rank())
       std::cout << "Time (ms)  : " << elapsed_time << std::endl;
 
   if(comm.rank() == 0)
     std::cout << "--------------------------------------" << std::endl;
- // TODO: compute elapsed time
 }
