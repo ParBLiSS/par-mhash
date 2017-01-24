@@ -228,14 +228,16 @@ struct SeqMinHashGenerator {
         return output_iter;
     }
 };
-
+ 
+static double pgen_time = 0.0;
 template<typename Iterator, typename ReadIdType=uint64_t>
 uint64_t generatePairs(const mxx::comm& comm,
                        Iterator start_itr,
                        Iterator end_itr,
                        std::vector<std::pair<ReadIdType, ReadIdType>>& read_pairs){
     uint64_t nsize = std::distance(start_itr, end_itr);
-    // return nsize;
+    //auto start = std::chrono::steady_clock::now();
+    //if(nsize > 150) return 0;
     for(auto outer_itr = start_itr; outer_itr != end_itr; outer_itr++){
         for(auto inner_itr = outer_itr + 1; inner_itr != end_itr; inner_itr++){
             if(outer_itr->seq_id == inner_itr->seq_id) continue;
@@ -248,6 +250,7 @@ uint64_t generatePairs(const mxx::comm& comm,
                                                     outer_itr->seq_id));
         }
     }
+    //pgen_time += 
     return nsize;
 }
 
@@ -302,9 +305,9 @@ uint64_t generateOverlapReadPairs(const mxx::comm& comm,
 
     if(csize > max_size) max_size = csize;
     // return max_size;
-    auto rmax_size = mxx::allreduce(max_size, std::greater<std::size_t>(), comm);
-    if(comm.rank() == 0)
-      std::cout << "Maximum Size  : " << rmax_size << std::endl;
+    // auto rmax_size = mxx::allreduce(max_size, std::greater<std::size_t>(), comm);
+    // if(comm.rank() == 0)
+    //   std::cout << "Maximum Size  : " << rmax_size << std::endl;
 
    // remove duplicates
     eliminateDuplicates(comm, read_pairs);
@@ -392,6 +395,8 @@ void runFSO(mxx::comm& comm,
   load_file_data(comm, inFiles, file_data);
   BL_BENCH_COLLECTIVE_END(rfso, "read_files", total, comm);
 
+  comm.barrier();
+  auto start = std::chrono::steady_clock::now();
   BL_BENCH_START(rfso);
   std::vector< std::pair<T, T> > read_pairs;
   for(auto i = 0u; i < hash_block_count; i++){
@@ -413,6 +418,12 @@ void runFSO(mxx::comm& comm,
   compareOverLaps(comm, positionFile, read_pairs, threshold);
   BL_BENCH_COLLECTIVE_END(rfso, "compare_overlaps", read_pairs.size(), comm);
 
+  comm.barrier();
+  auto end = std::chrono::steady_clock::now();
+  auto elapsed_time  = std::chrono::duration<double, std::milli>(end - start).count();
+
+  if(!comm.rank())
+      std::cout << "Pair Time (ms)  : " << elapsed_time << std::endl;
   BL_BENCH_REPORT_MPI_NAMED(rfso, "rfso_app", comm);
 }
 
