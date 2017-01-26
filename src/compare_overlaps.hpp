@@ -87,6 +87,8 @@ void loadPositionFile(const mxx::comm& comm,
   auto totalPosLines = mxx::allreduce(bufferStore.size(), comm);
   if(comm.rank() == 0)
       std::cout << "POS FILE RECORDS : " << totalPosLines << std::endl;
+  if(totalPosLines == 0)
+      return;
   auto vx = mxx::left_shift(bufferStore.front(), comm);
   
   // generate the pairs
@@ -126,6 +128,8 @@ void generateTruePairs(const mxx::comm& comm,
   loadPositionFile(comm, positionFile, readPosPairs);
   BL_BENCH_COLLECTIVE_END(cmpr, "load_pos", readPosPairs.size(), comm);
   auto totalPosLines = mxx::allreduce(readPosPairs.size(), comm);
+  if(totalPosLines == 0)
+      return;
 
   // sort by positionFile
   BL_BENCH_START(cmpr);
