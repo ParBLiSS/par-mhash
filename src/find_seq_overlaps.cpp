@@ -230,17 +230,16 @@ struct SeqMinHashGenerator {
         return output_iter;
     }
 };
-
+ 
+static double pgen_time = 0.0;
 template<typename Iterator, typename ReadIdType=uint64_t>
 uint64_t generatePairs(const mxx::comm& comm,
                        Iterator start_itr,
                        Iterator end_itr,
                        std::vector<std::pair<ReadIdType, ReadIdType>>& read_pairs){
     uint64_t nsize = std::distance(start_itr, end_itr);
-    if(nsize == 0) return 0;
-    total_blocks++;
-    if(nsize > 150) return 0;
-    processed_blocks++;
+    //auto start = std::chrono::steady_clock::now();
+    //if(nsize > 150) return 0;
     for(auto outer_itr = start_itr; outer_itr != end_itr; outer_itr++){
         for(auto inner_itr = outer_itr + 1; inner_itr != end_itr; inner_itr++){
             if(outer_itr->seq_id == inner_itr->seq_id) continue;
@@ -254,6 +253,7 @@ uint64_t generatePairs(const mxx::comm& comm,
                                                     outer_itr->seq_id));
         }
     }
+    //pgen_time += 
     return nsize;
 }
 
@@ -337,6 +337,10 @@ uint64_t generateOverlapReadPairs(const mxx::comm& comm,
          rbv_itr == local_rhpairs.begin() + end_offset && prev_rbv != rbv_itr)
           csize = generatePairs(comm, prev_rbv, rbv_itr, read_pairs);
 
+    // return max_size;
+    // auto rmax_size = mxx::allreduce(max_size, std::greater<std::size_t>(), comm);
+    // if(comm.rank() == 0)
+    //   std::cout << "Maximum Size  : " << rmax_size << std::endl;
       // remove local duplicates
       eliminateLocalDupes(read_pairs);
       if(csize > max_size) max_size = csize;
