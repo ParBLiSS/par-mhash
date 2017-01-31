@@ -74,3 +74,6 @@ target_link_libraries(find_seq_overlaps ${EXTRA_LIBS} bliss-utils)
 
 add_executable(find_kmer_overlaps src/find_kmer_overlaps.cpp src/io_utils.cpp)
 target_link_libraries(find_kmer_overlaps ${EXTRA_LIBS} bliss-utils)
+
+add_executable(length_hist src/length_hist.cpp src/io_utils.cpp)
+target_link_libraries(length_hist ${EXTRA_LIBS} bliss-utils)
