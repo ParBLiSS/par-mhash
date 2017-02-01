@@ -471,6 +471,19 @@ void runFSO(mxx::comm& comm,
                 << " Block Count     : " << hash_block_count
                 << " Kmer Length     : " << HASH_KMER_SIZE  << std::endl;
   }
+
+  std::stringstream outs;
+  outs << outPrefix << "_"
+       << (comm.rank() < 10 ? "000" :
+           (comm.rank() < 100 ? "00" :
+            (comm.rank() < 1000 ? "0" : "")))
+       << comm.rank() << ".txt";
+
+  std::string outputFile = outs.str();
+  std::ofstream ofs(outputFile);
+  for(auto px : read_pairs)
+      ofs << px.first << " " << px.second << std::endl;
+
   compareOverLaps(comm, positionFile, read_pairs, threshold);
   BL_BENCH_COLLECTIVE_END(rfso, "compare_overlaps", read_pairs.size(), comm);
   comm.barrier();
