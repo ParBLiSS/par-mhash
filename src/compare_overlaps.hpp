@@ -11,6 +11,11 @@
 
 #include "io_utils.hpp"
 
+bool has_suffix(const std::string &str, const std::string &suffix)
+{
+    return str.size() >= suffix.size() &&
+        str.compare(str.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
 
 template <typename T>
 void findTruePairs (std::vector<std::pair<T,T> >& read_pos,
@@ -73,9 +78,9 @@ void eliminateDuplicates(const mxx::comm& comm,
 }
 
 template<typename T>
-void loadPositionFile(const mxx::comm& comm,
-                      std::string positionFile,
-                      std::vector<std::pair<T, T>>& readPairs){
+void loadSimulatedPosFile(const mxx::comm& comm,
+                          std::string positionFile,
+                          std::vector<std::pair<T, T>>& readPairs){
 
   // compute start and end offsets corresponding this rank
   T offsetStart, offsetEnd;
@@ -114,6 +119,52 @@ void loadPositionFile(const mxx::comm& comm,
   totalPosLines = mxx::allreduce(readPairs.size(), comm);
   if(comm.rank() == 0)
      std::cout << "POS DATA : " << totalPosLines << std::endl;
+}
+template<typename T>
+void loadSAMPosFile(const mxx::comm& comm,
+                    std::string positionFile,
+                    std::vector<std::pair<T, T>>& readPairs){
+
+    // compute start and end offsets corresponding this rank
+    T offsetStart, offsetEnd;
+    compute_offsets(comm, positionFile, offsetStart, offsetEnd);
+
+    // load the block
+    std::vector<std::string> bufferStore ;
+    read_block(comm, positionFile, offsetStart, offsetEnd, bufferStore);
+    auto totalPosLines = mxx::allreduce(bufferStore.size(), comm);
+    if(comm.rank() == 0)
+        std::cout << "POS FILE RECORDS : " << totalPosLines << std::endl;
+    if(totalPosLines == 0)
+        return;
+    auto vx = mxx::left_shift(bufferStore.front(), comm);
+    // generate the pairs
+    // input position file has format for paired end reads:
+    // position_left_end position_right_end
+    readPairs.resize(bufferStore.size());
+    auto rpItr = readPairs.begin();
+    for(auto rcd : bufferStore){
+        T readIdx, inValue;
+        std::stringstream strStream(rcd);
+        strStream >> readIdx;
+        strStream >> inValue;
+        *rpItr = std::make_pair(readIdx, inValue);
+    }
+
+    totalPosLines = mxx::allreduce(readPairs.size(), comm);
+    if(comm.rank() == 0)
+        std::cout << "POS DATA : " << totalPosLines << std::endl;
+}
+
+template<typename T>
+void loadPositionFile(const mxx::comm& comm,
+                      std::string positionFile,
+                      std::vector<std::pair<T, T>>& readPairs){
+    if(has_suffix(positionFile, ".map")){
+        loadSAMPosFile(comm, positionFile, readPairs);
+    } else {
+        loadSimulatedPosFile(comm, positionFile, readPairs);
+    }
 }
 
 template<typename T>
