@@ -30,6 +30,7 @@
 
 static uint64_t total_blocks = 0;
 static uint64_t processed_blocks = 0;
+static unsigned read_threshold = READ_THRESHOLD;
 
 //
 // @brief Kmer specialization for MurmurHash.  generated hash is 128 bit.
@@ -96,12 +97,17 @@ struct ReadMinHashBlock{
     BT hash_values;
 
     void reset(){
+        seq_id = std::numeric_limits<std::size_t>::max();
         for(auto i = 0; i < hash_values.size();i++)
             hash_values[i] = std::numeric_limits<HashValueType>::max();
     }
 
     ReadMinHashBlock() {
         reset();
+    }
+
+    bool is_good(){
+        return (seq_id < std::numeric_limits<std::size_t>::max());
     }
 
     void print(std::ostream& ofs){
@@ -199,6 +205,10 @@ struct SeqMinHashGenerator {
         bliss::partition::range<size_t> seq_range(
             read.seq_global_offset(), read.seq_global_offset() + read.seq_size());
         value_type hrv;
+        if(read.seq_size() < read_threshold){
+           *output_iter = hrv;
+           return output_iter;
+        }
         hrv.seq_id = read.id.get_pos();
         if (seq_range.contains(valid_range.end)) {
             // seq_range contains overlap.
@@ -382,6 +392,12 @@ void generateSequencePairs(mxx::comm& comm,
     parse_file_data<SeqMinHashGeneratorType, FileParser,
                     SeqIterType>(file_data, local_rhpairs, comm);
 
+  std::size_t j = 0;
+  for(std::size_t i = 0; i < local_rhpairs.size();i++)
+    if(local_rhpairs[i].is_good())
+       local_rhpairs[j++] = local_rhpairs[i];
+  local_rhpairs.resize(j);
+
   BL_BENCH_COLLECTIVE_END(genpr, "compute_hash", local_rhpairs.size(), comm);
 
   BL_BENCH_START(genpr);
@@ -499,6 +515,7 @@ void parse_args(int argc, char **argv,
                 mxx::comm& comm,
                 std::string& positionFile,
                 std::vector<std::string>& filenames,
+                std::string& olapPrefix,
                 std::string& outPrefix,
                 uint32_t& threshold){
   try { // try-catch block for commandline
@@ -537,6 +554,11 @@ void parse_args(int argc, char **argv,
     //                                          false, 4, "int", cmd);
 
 
+    // olap only 
+    TCLAP::ValueArg<std::string> olapFileArg("L", "olap_prefix",
+                                             "Overlap file Prefix",
+                                             false, "", "string", cmd);
+
     // input files
     TCLAP::UnlabeledMultiArg<std::string> fileArg("filenames", "FASTA or FASTQ file names",
                                                   true, "string", cmd);
@@ -547,6 +569,7 @@ void parse_args(int argc, char **argv,
 
     positionFile = positionArg.getValue();
     outPrefix = outputArg.getValue();
+    olapPrefix = olapFileArg.getValue();
     filenames = fileArg.getValue();
     threshold = threshArg.getValue();
     hash_block_count = blockCountArg.getValue();
@@ -555,6 +578,7 @@ void parse_args(int argc, char **argv,
     if(comm.rank() == 0){
       std::cout << "Position File   : " << positionFile << std::endl;
       std::cout << "Output File Pfx : " << outPrefix << std::endl;
+      std::cout << "Olap File Pfx   : " << olapPrefix << std::endl;
       std::cout << "Input File      : " << filenames.front() << std::endl;
       std::cout << "Threshold       : " << threshold << std::endl;
       std::cout << "Block Size      : " << hash_block_size << std::endl;
@@ -568,29 +592,10 @@ void parse_args(int argc, char **argv,
   }
 }
 
-int main(int argc, char** argv) {
 
-  LOG_INIT(); // init logging
-
-  mxx::env e(argc, argv); // MPI init
-  mxx::comm comm;
-
-  if(comm.rank() == 0)
-    std::cout << "--------------------------------------" << std::endl;
-  if (comm.rank() == 0)
-    std::cout << "EXECUTABLE  : " << std::string(argv[0]) << std::endl;
-
-
-  std::string positionFile;
-  std::vector<std::string> filenames;
-  std::string outPrefix;
-  uint32_t threshold;
-  outPrefix.assign("./output");
-  total_blocks = 0;
-  processed_blocks = 0;
-  // parse arguments
-  parse_args(argc, argv, comm,
-             positionFile, filenames, outPrefix, threshold);
+int genOlaps(mxx::comm& comm, std::string positionFile, 
+             std::vector<std::string> filenames,
+             std::string outPrefix, uint32_t threshold) {
 
   hash_seeds_size = (hash_block_size * hash_block_count);
   auto availableSeeds = sizeof(hash_seed_values);
@@ -629,4 +634,87 @@ int main(int argc, char** argv) {
 
   if(comm.rank() == 0)
     std::cout << "--------------------------------------" << std::endl;
+  return 0;
+}
+
+int evalOlaps(mxx::comm& comm, std::string positionFile, 
+              std::string olapPrefix, uint32_t threshold){
+
+  std::stringstream outs;
+  outs << olapPrefix << "_"
+       << (comm.rank() < 10 ? "000" :
+           (comm.rank() < 100 ? "00" :
+            (comm.rank() < 1000 ? "0" : "")))
+       << comm.rank() << ".txt";
+  std::string olapFile = outs.str();
+
+  comm.barrier();
+  auto start = std::chrono::steady_clock::now();
+
+  std::vector< std::pair<uint64_t, uint64_t> > read_pairs;
+  std::ifstream fin(olapFile.c_str());
+  while(fin.good()){
+      std::string rcd;
+      std::getline(fin, rcd);
+      uint64_t rid1, rid2;
+      std::stringstream strStream(rcd);
+      strStream >> rid1;
+      strStream >> rid2;
+      read_pairs.push_back(std::make_pair(rid1, rid2));
+  }
+  fin.close();
+
+  std::vector<std::pair<uint64_t,uint64_t>>(read_pairs).swap(read_pairs);
+
+  auto totalPairs = mxx::allreduce(read_pairs.size(), comm);
+  if(comm.rank() == 0)
+     std::cout << "COMPUTED TOTAL : " << totalPairs << std::endl;
+
+  compareOverLaps(comm, positionFile, read_pairs, threshold);
+
+  comm.barrier();
+  auto end = std::chrono::steady_clock::now();
+  auto elapsed_time  = std::chrono::duration<double, std::milli>(end - start).count();
+  if(!comm.rank())
+      std::cout << "Time (ms)  : " << elapsed_time << std::endl;
+  return 0;
+}
+
+int main(int argc, char** argv) {
+
+  LOG_INIT(); // init logging
+
+  mxx::env e(argc, argv); // MPI init
+  mxx::comm comm;
+
+  if(comm.rank() == 0)
+    std::cout << "--------------------------------------" << std::endl;
+  if (comm.rank() == 0)
+    std::cout << "EXECUTABLE  : " << std::string(argv[0]) << std::endl;
+
+
+  std::string positionFile;
+  std::vector<std::string> filenames;
+  std::string outPrefix;
+  std::string olapPrefix;
+  uint32_t threshold;
+  outPrefix.assign("./output");
+  total_blocks = 0;
+  processed_blocks = 0;
+  // parse arguments
+  parse_args(argc, argv, comm,
+             positionFile, filenames, 
+             olapPrefix, outPrefix, threshold);
+
+  if(olapPrefix.length() > 0) {
+    if(comm.rank() == 0)
+      std::cout << "---- Evaluate Overlaps ----" << std::endl;
+
+    return evalOlaps(comm, positionFile, olapPrefix, threshold);
+  } else {
+    if(comm.rank() == 0)
+      std::cout << "---- Generate Overlaps ----" << std::endl;
+     return genOlaps(comm, positionFile, filenames, outPrefix, threshold);
+  }
+
 }

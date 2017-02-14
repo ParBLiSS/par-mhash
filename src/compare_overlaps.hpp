@@ -82,6 +82,9 @@ void loadSimulatedPosFile(const mxx::comm& comm,
                           std::string positionFile,
                           std::vector<std::pair<T, T>>& readPairs){
 
+  if(comm.rank() == 0)
+     std::cout << "---- Start Loading SIM POS File : [" << positionFile << "] ----" << std::endl;
+
   // compute start and end offsets corresponding this rank
   T offsetStart, offsetEnd;
   compute_offsets(comm, positionFile, offsetStart, offsetEnd);
@@ -119,11 +122,16 @@ void loadSimulatedPosFile(const mxx::comm& comm,
   totalPosLines = mxx::allreduce(readPairs.size(), comm);
   if(comm.rank() == 0)
      std::cout << "POS DATA : " << totalPosLines << std::endl;
+  if(comm.rank() == 0)
+     std::cout << "---- Finish Loading SIM POS File ----" << std::endl;
 }
 template<typename T>
 void loadSAMPosFile(const mxx::comm& comm,
                     std::string positionFile,
                     std::vector<std::pair<T, T>>& readPairs){
+
+    if(comm.rank() == 0)
+       std::cout << "---- Start Loading SAM POS File: [" << positionFile <<  "] ----" << std::endl;
 
     // compute start and end offsets corresponding this rank
     T offsetStart, offsetEnd;
@@ -142,25 +150,28 @@ void loadSAMPosFile(const mxx::comm& comm,
     // input position file has format for paired end reads:
     // position_left_end position_right_end
     readPairs.resize(bufferStore.size());
-    auto rpItr = readPairs.begin();
+    std::size_t rix = 0;
     for(auto rcd : bufferStore){
         T readIdx, inValue;
         std::stringstream strStream(rcd);
         strStream >> readIdx;
         strStream >> inValue;
-        *rpItr = std::make_pair(readIdx, inValue);
+        readPairs[rix] = std::make_pair(readIdx, inValue);
+        rix++;
     }
 
-    totalPosLines = mxx::allreduce(readPairs.size(), comm);
+    auto totalRecords = mxx::allreduce(rix, comm);
     if(comm.rank() == 0)
-        std::cout << "POS DATA : " << totalPosLines << std::endl;
+        std::cout << "POS DATA : " << totalRecords << std::endl;
+    if(comm.rank() == 0)
+       std::cout << "---- Finish Loading SAM POS File ----" << std::endl;
 }
 
 template<typename T>
 void loadPositionFile(const mxx::comm& comm,
                       std::string positionFile,
                       std::vector<std::pair<T, T>>& readPairs){
-    if(has_suffix(positionFile, ".map")){
+    if(has_suffix(positionFile, "map")){
         loadSAMPosFile(comm, positionFile, readPairs);
     } else {
         loadSimulatedPosFile(comm, positionFile, readPairs);
@@ -218,8 +229,10 @@ void generateTruePairs(const mxx::comm& comm,
   localRegion.resize(endOffset + straddleRegion.size()); // TODO: check if this is correct
   std::copy(readPosPairs.begin(), readPosPairs.begin() + endOffset,
             localRegion.begin());
+  std::vector<std::pair<T,T>>().swap(readPosPairs);
   std::copy(straddleRegion.begin(), straddleRegion.end(),
             localRegion.begin() + endOffset);
+  std::vector<std::pair<T,T>>().swap(straddleRegion);
   BL_BENCH_COLLECTIVE_END(cmpr, "local_region", localRegion.size(), comm);
 
   // generate pairs
