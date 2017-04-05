@@ -449,6 +449,7 @@ void runFSO(mxx::comm& comm,
             std::string positionFile,
             std::vector<std::string>& inFiles,
             std::string outPrefix,
+            unsigned readLength,
             uint32_t threshold){
 
   // Read files
@@ -497,10 +498,11 @@ void runFSO(mxx::comm& comm,
 
   std::string outputFile = outs.str();
   std::ofstream ofs(outputFile);
-  for(auto px : read_pairs)
-      ofs << px.first << " " << px.second << std::endl;
+  if(ofs.good())
+      for(auto px : read_pairs)
+          ofs << px.first << " " << px.second << std::endl;
 
-  compareOverLaps(comm, positionFile, read_pairs, threshold);
+  compareOverLaps(comm, positionFile, readLength, read_pairs,  threshold);
   BL_BENCH_COLLECTIVE_END(rfso, "compare_overlaps", read_pairs.size(), comm);
   comm.barrier();
   auto end = std::chrono::steady_clock::now();
@@ -517,6 +519,7 @@ void parse_args(int argc, char **argv,
                 std::vector<std::string>& filenames,
                 std::string& olapPrefix,
                 std::string& outPrefix,
+                unsigned& read_length,
                 uint32_t& threshold){
   try { // try-catch block for commandline
 
@@ -553,8 +556,12 @@ void parse_args(int argc, char **argv,
     //                                          "Block Size",
     //                                          false, 4, "int", cmd);
 
+    // block count argument
+    TCLAP::ValueArg<unsigned> readLengthArg("r", "read_length",
+                                       "read length",
+                                       false, 100, "unsigned", cmd);
 
-    // olap only 
+    // olap only
     TCLAP::ValueArg<std::string> olapFileArg("L", "olap_prefix",
                                              "Overlap file Prefix",
                                              false, "", "string", cmd);
@@ -574,6 +581,7 @@ void parse_args(int argc, char **argv,
     threshold = threshArg.getValue();
     hash_block_count = blockCountArg.getValue();
     // hash_block_size = blockSizeArg.getValue();
+    read_length = readLengthArg.getValue();
 
     if(comm.rank() == 0){
       std::cout << "Position File   : " << positionFile << std::endl;
@@ -584,6 +592,7 @@ void parse_args(int argc, char **argv,
       std::cout << "Block Size      : " << hash_block_size << std::endl;
       std::cout << "Block Count     : " << hash_block_count << std::endl;
       std::cout << "Kmer Length     : " << HASH_KMER_SIZE  << std::endl;
+      std::cout << "Read Length     : " << read_length << std::endl;
     }
 
   } catch (TCLAP::ArgException &e)  {
@@ -595,7 +604,8 @@ void parse_args(int argc, char **argv,
 
 int genOlaps(mxx::comm& comm, std::string positionFile, 
              std::vector<std::string> filenames,
-             std::string outPrefix, uint32_t threshold) {
+             std::string outPrefix, unsigned readLength,
+             uint32_t threshold) {
 
   hash_seeds_size = (hash_block_size * hash_block_count);
   auto availableSeeds = sizeof(hash_seed_values);
@@ -614,7 +624,7 @@ int genOlaps(mxx::comm& comm, std::string positionFile,
   comm.barrier();
   auto start = std::chrono::steady_clock::now();
 
-  runFSO(comm, positionFile, filenames, outPrefix, threshold);
+  runFSO(comm, positionFile, filenames, outPrefix, readLength, threshold);
   //std::vector< std::pair<uint64_t, uint64_t> > read_pairs;
   //compareOverLaps(comm, positionFile, read_pairs, threshold);
 
@@ -638,7 +648,8 @@ int genOlaps(mxx::comm& comm, std::string positionFile,
 }
 
 int evalOlaps(mxx::comm& comm, std::string positionFile, 
-              std::string olapPrefix, uint32_t threshold){
+              std::string olapPrefix, unsigned readLength,
+              uint32_t threshold){
 
   std::stringstream outs;
   outs << olapPrefix << "_"
@@ -670,8 +681,9 @@ int evalOlaps(mxx::comm& comm, std::string positionFile,
   if(comm.rank() == 0)
      std::cout << "COMPUTED TOTAL : " << totalPairs << std::endl;
 
-  compareOverLaps(comm, positionFile, read_pairs, threshold);
+  // comparePosOverLaps(comm, positionFile, read_pairs, threshold);
 
+  compareOverLaps(comm, positionFile, readLength, read_pairs, threshold);
   comm.barrier();
   auto end = std::chrono::steady_clock::now();
   auto elapsed_time  = std::chrono::duration<double, std::milli>(end - start).count();
@@ -698,23 +710,26 @@ int main(int argc, char** argv) {
   std::string outPrefix;
   std::string olapPrefix;
   uint32_t threshold;
+  unsigned readLength;
   outPrefix.assign("./output");
   total_blocks = 0;
   processed_blocks = 0;
   // parse arguments
   parse_args(argc, argv, comm,
              positionFile, filenames, 
-             olapPrefix, outPrefix, threshold);
+             olapPrefix, outPrefix,
+             readLength,
+             threshold);
 
   if(olapPrefix.length() > 0) {
     if(comm.rank() == 0)
       std::cout << "---- Evaluate Overlaps ----" << std::endl;
 
-    return evalOlaps(comm, positionFile, olapPrefix, threshold);
+    return evalOlaps(comm, positionFile, olapPrefix, readLength, threshold);
   } else {
     if(comm.rank() == 0)
       std::cout << "---- Generate Overlaps ----" << std::endl;
-     return genOlaps(comm, positionFile, filenames, outPrefix, threshold);
+    return genOlaps(comm, positionFile, filenames, outPrefix, readLength, threshold);
   }
 
 }

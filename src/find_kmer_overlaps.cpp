@@ -352,9 +352,9 @@ void runKSO(mxx::comm& comm,
     if(comm.rank() == 0)
         std::cout << "Maximum Size  : " << rmax_size << std::endl;
 
-    BL_BENCH_START(kfso);
-    compareOverLaps(comm, positionFile, read_pairs, threshold);
-    BL_BENCH_COLLECTIVE_END(kfso, "compare_overlaps", read_pairs.size(), comm);
+    // BL_BENCH_START(kfso);
+    // compareOverLaps(comm, positionFile, read_pairs, threshold);
+    // BL_BENCH_COLLECTIVE_END(kfso, "compare_overlaps", read_pairs.size(), comm);
 
     BL_BENCH_REPORT_MPI_NAMED(kfso, "kfso_app", comm);
 }

@@ -11,6 +11,54 @@
 
 #include "io_utils.hpp"
 
+static uint64_t RPOS_MISSING;
+static uint32_t RLEN_MISSING;
+
+template<typename T>
+struct ReadPair{
+    T first, second;
+    char indicator;
+    bool operator==(const ReadPair& other){
+        return (first == other.first) &&
+            (second == other.second);
+    }
+};
+
+#define CMP_WRAP_TEMPLATE(...) __VA_ARGS__
+namespace mxx {
+    template <typename T>
+    MXX_CUSTOM_TEMPLATE_STRUCT(CMP_WRAP_TEMPLATE(ReadPair<T>), \
+                               first, second, indicator);
+}
+
+template<typename T>
+struct PosReadPair{
+    T first, second;
+    uint64_t first_position, second_position;
+    uint32_t first_length, second_length;
+    bool operator==(const PosReadPair& other){
+        return (first == other.first) &&
+            (second == other.second);
+    }
+    PosReadPair(){
+        first_position = second_position = RPOS_MISSING;
+        first_length = second_length = RLEN_MISSING;
+    }
+
+    bool is_pos_bad() const{
+        return (first_position == RPOS_MISSING) ||
+            (second_position == RPOS_MISSING);
+    }
+};
+
+#define CMP_WRAP_TEMPLATE(...) __VA_ARGS__
+namespace mxx {
+    template <typename T>
+    MXX_CUSTOM_TEMPLATE_STRUCT(CMP_WRAP_TEMPLATE(PosReadPair<T>), \
+                               first, second, first_position, second_position, first_length, second_length);
+}
+
+
 bool has_suffix(const std::string &str, const std::string &suffix)
 {
     return str.size() >= suffix.size() &&
@@ -51,6 +99,46 @@ void findTruePairs (std::vector<std::pair<T,T> >& read_pos,
     }
 }
 
+template<typename T>
+void findTruePairs(std::vector<std::pair<T,T> >& read_pos,
+                   std::vector<unsigned>& read_len,
+                   unsigned const_read_len,
+                   std::vector<std::pair<T,T> >& read_pairs,
+                   uint64_t min_overlap) {
+    long unsigned int up=0, down=1;
+    assert(read_pos.size() == read_len.size());
+    auto read_len_fn = [&](int idx){
+        if(idx < read_len.size())
+            return read_len[idx];
+        else
+            return const_read_len;
+    };
+    while(true) {
+        if (up >= read_pos.size()) {
+            break;
+        }
+        while (true) {
+            if (down >= read_pos.size()) {
+                break;
+            }
+            //if (read_pos[down].second - read_pos[up].second < thresh) {
+            if (read_pos[up].second + read_len_fn(up) >= read_pos[down].second + min_overlap) {
+                down++;
+            }
+            else {
+                break;
+            }
+        }
+        assert(down > up);
+        // gen pairs [up,down)
+        for (long unsigned int pos=up+1; pos < down; pos++) {
+            std::pair <T,T> P = std::make_pair<T,T>(read_pos[up].first, read_pos[pos].first);
+            read_pairs.push_back(P);
+        }
+        up++;
+    }
+}
+
 
 template<typename T>
 void eliminateDuplicates(const mxx::comm& comm,
@@ -80,7 +168,9 @@ void eliminateDuplicates(const mxx::comm& comm,
 template<typename T>
 void loadSimulatedPosFile(const mxx::comm& comm,
                           std::string positionFile,
-                          std::vector<std::pair<T, T>>& readPairs){
+                          unsigned rlen,
+                          std::vector<std::pair<T, T>>& readPairs,
+                          std::vector<unsigned>& readLengths){
 
   if(comm.rank() == 0)
      std::cout << "---- Start Loading SIM POS File : [" << positionFile << "] ----" << std::endl;
@@ -120,15 +210,21 @@ void loadSimulatedPosFile(const mxx::comm& comm,
   }
 
   totalPosLines = mxx::allreduce(readPairs.size(), comm);
+  readLengths.resize(readPairs.size());
+  for(auto vx = readLengths.begin(); vx != readLengths.end(); vx++)
+      *vx = rlen;
+
   if(comm.rank() == 0)
      std::cout << "POS DATA : " << totalPosLines << std::endl;
   if(comm.rank() == 0)
      std::cout << "---- Finish Loading SIM POS File ----" << std::endl;
 }
+
 template<typename T>
 void loadSAMPosFile(const mxx::comm& comm,
                     std::string positionFile,
-                    std::vector<std::pair<T, T>>& readPairs){
+                    std::vector<std::pair<T, T>>& readPairs,
+                    std::vector<unsigned>& readLengths){
 
     if(comm.rank() == 0)
        std::cout << "---- Start Loading SAM POS File: [" << positionFile <<  "] ----" << std::endl;
@@ -150,12 +246,15 @@ void loadSAMPosFile(const mxx::comm& comm,
     // input position file has format for paired end reads:
     // position_left_end position_right_end
     readPairs.resize(bufferStore.size());
+    readLengths.resize(bufferStore.size());
     std::size_t rix = 0;
     for(auto rcd : bufferStore){
         T readIdx, inValue;
+        unsigned rlen;
         std::stringstream strStream(rcd);
         strStream >> readIdx;
         strStream >> inValue;
+        strStream >> rlen;
         readPairs[rix] = std::make_pair(readIdx, inValue);
         rix++;
     }
@@ -170,24 +269,28 @@ void loadSAMPosFile(const mxx::comm& comm,
 template<typename T>
 void loadPositionFile(const mxx::comm& comm,
                       std::string positionFile,
-                      std::vector<std::pair<T, T>>& readPairs){
+                      unsigned readLength,
+                      std::vector<std::pair<T, T>>& readPairs,
+                      std::vector<unsigned>& readLengths){
     if(has_suffix(positionFile, "map")){
-        loadSAMPosFile(comm, positionFile, readPairs);
+        loadSAMPosFile(comm, positionFile, readPairs, readLengths);
     } else {
-        loadSimulatedPosFile(comm, positionFile, readPairs);
+        loadSimulatedPosFile(comm, positionFile, readLength, readPairs, readLengths);
     }
 }
 
 template<typename T>
 void generateTruePairs(const mxx::comm& comm,
                        std::string positionFile,
+                       unsigned rlen,
                        uint32_t threshold,
                        std::vector< std::pair<T, T> >& truePairs){
   BL_BENCH_INIT(cmpr);
   BL_BENCH_START(cmpr);
   // load the position file
   std::vector<std::pair<T, T>> readPosPairs;
-  loadPositionFile(comm, positionFile, readPosPairs);
+  std::vector<unsigned> readLengths;
+  loadPositionFile(comm, positionFile, rlen, readPosPairs, readLengths);
   BL_BENCH_COLLECTIVE_END(cmpr, "load_pos", readPosPairs.size(), comm);
   auto totalPosLines = mxx::allreduce(readPosPairs.size(), comm);
   if(totalPosLines == 0)
@@ -244,23 +347,6 @@ void generateTruePairs(const mxx::comm& comm,
   eliminateDuplicates(comm, truePairs);
   BL_BENCH_COLLECTIVE_END(cmpr, "unique_pairs", truePairs.size(), comm);
   BL_BENCH_REPORT_MPI_NAMED(cmpr, "cmpr_app", comm);
-}
-
-template<typename T>
-struct ReadPair{
-    T first, second;
-    char indicator;
-    bool operator==(const ReadPair& other){
-        return (first == other.first) &&
-            (second == other.second);
-    }
-};
-
-#define CMP_WRAP_TEMPLATE(...) __VA_ARGS__
-namespace mxx {
-    template <typename T>
-    MXX_CUSTOM_TEMPLATE_STRUCT(CMP_WRAP_TEMPLATE(ReadPair<T>), \
-                               first, second, indicator);
 }
 
 template<typename T>
@@ -342,12 +428,13 @@ void computeSetDifference(const mxx::comm& comm,
 template<typename T>
 void compareOverLaps(const mxx::comm& comm,
                      std::string positionFile,
+                     unsigned readLength,
                      std::vector<std::pair<T, T>>& candidatePairs,
                      uint32_t threshold){
 
     // generate true pairs
     std::vector<std::pair<T, T>> truePairs;
-    generateTruePairs(comm, positionFile, threshold, truePairs);
+    generateTruePairs(comm, positionFile, readLength, threshold, truePairs);
 
     auto totalTruePairs = mxx::allreduce(truePairs.size(), comm);
     if(comm.rank() == 0)
@@ -355,6 +442,220 @@ void compareOverLaps(const mxx::comm& comm,
 
     //
     computeSetDifference(comm, candidatePairs, truePairs);
+}
+
+
+template<typename T>
+void loadSimulatedPosFile(const mxx::comm& comm,
+                          std::string positionFile,
+                          std::vector<PosReadPair<T>>& readPairs){
+
+  if(comm.rank() == 0)
+     std::cout << "---- Start Loading SIM POS File : [" << positionFile << "] ----" << std::endl;
+
+  // compute start and end offsets corresponding this rank
+  T offsetStart, offsetEnd;
+  compute_offsets(comm, positionFile, offsetStart, offsetEnd);
+
+  // load the block
+  std::vector<std::string> bufferStore ;
+  read_block(comm, positionFile, offsetStart, offsetEnd, bufferStore);
+  auto totalPosLines = mxx::allreduce(bufferStore.size(), comm);
+  if(comm.rank() == 0)
+      std::cout << "POS FILE RECORDS : " << totalPosLines << std::endl;
+  if(totalPosLines == 0)
+      return;
+  auto vx = mxx::left_shift(bufferStore.front(), comm);
+
+  // generate the pairs
+  // input position file has format for paired end reads:
+  // position_left_end position_right_end
+  readPairs.resize(2 * bufferStore.size());
+  auto startIdx = mxx::scan(bufferStore.size(), comm);
+  auto nRecords = mxx::allreduce(bufferStore.size(), comm);
+  if(bufferStore.size() > 0)
+    startIdx = startIdx - bufferStore.size();
+  auto rpItr = readPairs.begin();
+  auto nReads = startIdx - startIdx;
+  for(auto rcd : bufferStore){
+    uint64_t inValue;
+    std::stringstream strStream(rcd);
+    strStream >> inValue;
+    rpItr->first = rpItr->second = startIdx;
+    rpItr->first_position = rpItr->second_position = inValue;
+    rpItr->first_length = rpItr->second_length = 0;
+    rpItr++;
+    strStream >> inValue;
+    rpItr->first = rpItr->second = startIdx + nRecords;
+    rpItr->first_position = rpItr->second_position = inValue;
+    rpItr->first_length = rpItr->second_length = 0;
+    rpItr++; startIdx++;
+    nReads += 2;
+  }
+
+  totalPosLines = mxx::allreduce(nReads, comm);
+  if(comm.rank() == 0)
+     std::cout << "POS DATA : " << totalPosLines << std::endl;
+  if(comm.rank() == 0)
+     std::cout << "---- Finish Loading SIM POS File ----" << std::endl;
+}
+
+
+template<typename T>
+void loadSAMPosFile(const mxx::comm& comm,
+                    std::string positionFile,
+                    std::vector<PosReadPair<T>>& readPairs){
+
+    if(comm.rank() == 0)
+       std::cout << "---- Start Loading SAM POS File: [" << positionFile <<  "] ----" << std::endl;
+
+    // compute start and end offsets corresponding this rank
+    T offsetStart, offsetEnd;
+    compute_offsets(comm, positionFile, offsetStart, offsetEnd);
+
+    // load the block
+    std::vector<std::string> bufferStore ;
+    read_block(comm, positionFile, offsetStart, offsetEnd, bufferStore);
+    auto totalPosLines = mxx::allreduce(bufferStore.size(), comm);
+    if(comm.rank() == 0)
+        std::cout << "POS FILE RECORDS : " << totalPosLines << std::endl;
+    if(totalPosLines == 0)
+        return;
+    auto vx = mxx::left_shift(bufferStore.front(), comm);
+    // generate the pairs
+    // input position file has format for paired end reads:
+    // position_left_end position_right_end
+    readPairs.resize(bufferStore.size());
+    std::size_t rix = 0;
+    for(auto rcd : bufferStore){
+        T readIdx;
+        uint64_t inPos;
+        uint32_t inLen;
+        std::stringstream strStream(rcd);
+        strStream >> readIdx;
+        strStream >> inPos;
+        strStream >> inLen;
+        readPairs[rix].first =  readPairs[rix].second = readIdx;
+        readPairs[rix].first_position =  readPairs[rix].second_position = inLen;
+        readPairs[rix].first_length =  readPairs[rix].second_length = inLen;
+        rix++;
+    }
+
+    auto totalRecords = mxx::allreduce(rix, comm);
+    if(comm.rank() == 0)
+        std::cout << "POS DATA : " << totalRecords << std::endl;
+    if(comm.rank() == 0)
+       std::cout << "---- Finish Loading SAM POS File ----" << std::endl;
+}
+
+template<typename T>
+void loadPositionFile(const mxx::comm& comm,
+                      std::string positionFile,
+                      std::vector<PosReadPair<T>>& readPairs){
+    if(has_suffix(positionFile, "map")){
+        loadSAMPosFile(comm, positionFile, readPairs);
+    } else {
+        loadSimulatedPosFile(comm, positionFile, readPairs);
+    }
+}
+
+
+template<typename T>
+void updateReadPL(const mxx::comm& comm,
+                  std::vector<PosReadPair<T>>& readPairs){
+
+    auto fst_cmp_fn = [&] (const PosReadPair<T>& x, const PosReadPair<T>& y){
+        return ((x.first < y.first) ? true : (x.first_position < y.first_position));
+    };
+
+    auto snd_cmp_fn = [&] (const PosReadPair<T>& x, const PosReadPair<T>& y){
+        return (x.second < y.second) ? true : (x.second_position < y.second_position);
+    };
+
+    auto val_fn = [&](const PosReadPair<T>& x, const PosReadPair<T>& y){
+        return y.is_pos_bad() ? x : y;
+    };
+
+
+    if(!mxx::is_sorted(readPairs.begin(), readPairs.end(),
+                       fst_cmp_fn, comm))
+        mxx::sort(readPairs.begin(), readPairs.end(), fst_cmp_fn, comm);
+
+    PosReadPair<T> fxp;
+    for(auto rpitr = readPairs.rbegin(); rpitr != readPairs.rend(); rpitr++)
+        if(rpitr->first_position != RPOS_MISSING){
+            fxp = *rpitr;
+            break;
+        }
+
+    auto fyp = mxx::scan(fxp, val_fn, comm);;
+
+    // update first
+    for(auto rpx : readPairs){
+        if(rpx.first_position == RPOS_MISSING){
+            rpx.first_position = fyp.first_position;
+            rpx.first_length = fyp.first_length;
+        } else {
+            fyp = rpx;
+        }
+    }
+
+    if(!mxx::is_sorted(readPairs.begin(), readPairs.end(),
+                       snd_cmp_fn, comm))
+        mxx::sort(readPairs.begin(), readPairs.end(), snd_cmp_fn, comm);
+
+    PosReadPair<T> sxp;
+    for(auto rpitr = readPairs.rbegin(); rpitr != readPairs.rend(); rpitr++)
+        if(rpitr->first_position != RPOS_MISSING){
+            sxp = *rpitr;
+            break;
+        }
+    auto syp = mxx::scan(sxp, val_fn, comm);;
+
+    // update second
+    for(auto rpx : readPairs){
+        if(rpx.second_position == RPOS_MISSING){
+            rpx.second_position = syp.second_position;
+            rpx.second_length = syp.second_length;
+        } else {
+            syp = rpx;
+        }
+    }
+
+}
+
+template<typename T>
+void computeSetDiff(const mxx::comm& comm,
+                        std::vector<PosReadPair<T>>& readPairs,
+                        uint32_t threshold){
+    // ABANDON THIS
+    // REMOVE THIS LATER
+}
+
+template<typename T>
+void comparePosOverLaps(const mxx::comm& comm,
+                        std::string positionFile,
+                        std::vector<std::pair<T, T>>& candidatePairs,
+                        uint32_t threshold) {
+
+    std::vector<PosReadPair<T>> readPairs;
+    // generate true pairs
+    loadPositionFile(comm, positionFile, readPairs);
+
+    auto nsize = readPairs.size();
+    readPairs.resize(nsize + candidatePairs.size());
+    for(auto idx = nsize, jdx = (nsize - nsize); idx < readPairs.size(); idx++, jdx++){
+        readPairs[idx].first = candidatePairs[jdx].first;
+        readPairs[idx].second = candidatePairs[jdx].second;
+    }
+
+    auto totalTruePairs = mxx::allreduce(readPairs.size(), comm);
+    if(comm.rank() == 0)
+        std::cout << "ALL TOTAL : " << totalTruePairs << std::endl;
+
+    updateReadPL(comm, readPairs);
+
+    computeSetDiff(comm, readPairs, threshold);
 }
 
 
