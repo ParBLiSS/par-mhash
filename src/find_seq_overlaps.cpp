@@ -450,7 +450,7 @@ void runFSO(mxx::comm& comm,
             std::vector<std::string>& inFiles,
             std::string outPrefix,
             unsigned readLength,
-            uint32_t threshold){
+            uint32_t minOverlap){
 
   // Read files
   BL_BENCH_INIT(rfso);
@@ -483,7 +483,7 @@ void runFSO(mxx::comm& comm,
 
   BL_BENCH_START(rfso);
   if(comm.rank() == 0){
-      std::cout << " Threshold       : " << threshold 
+      std::cout << " Min Overlap       : " << minOverlap
                 << " Block Size      : " << hash_block_size 
                 << " Block Count     : " << hash_block_count
                 << " Kmer Length     : " << HASH_KMER_SIZE  << std::endl;
@@ -502,7 +502,7 @@ void runFSO(mxx::comm& comm,
       for(auto px : read_pairs)
           ofs << px.first << " " << px.second << std::endl;
 
-  compareOverLaps(comm, positionFile, readLength, read_pairs,  threshold);
+  compareOverLaps(comm, positionFile, readLength, read_pairs,  minOverlap);
   BL_BENCH_COLLECTIVE_END(rfso, "compare_overlaps", read_pairs.size(), comm);
   comm.barrier();
   auto end = std::chrono::steady_clock::now();
@@ -520,7 +520,7 @@ void parse_args(int argc, char **argv,
                 std::string& olapPrefix,
                 std::string& outPrefix,
                 unsigned& read_length,
-                uint32_t& threshold){
+                uint32_t& minOverlap){
   try { // try-catch block for commandline
 
     TCLAP::CmdLine cmd("Overlap Graph Construction", ' ', "0.1");
@@ -543,7 +543,7 @@ void parse_args(int argc, char **argv,
 
     // threshold argument
     TCLAP::ValueArg<uint32_t> threshArg("d", "overlap_threshold",
-                                          "Threshold for Overlap",
+                                          "Minimum Overlap",
                                           false, 20, "int", cmd);
 
     // block count argument
@@ -578,7 +578,7 @@ void parse_args(int argc, char **argv,
     outPrefix = outputArg.getValue();
     olapPrefix = olapFileArg.getValue();
     filenames = fileArg.getValue();
-    threshold = threshArg.getValue();
+    minOverlap = threshArg.getValue();
     hash_block_count = blockCountArg.getValue();
     // hash_block_size = blockSizeArg.getValue();
     read_length = readLengthArg.getValue();
@@ -588,7 +588,7 @@ void parse_args(int argc, char **argv,
       std::cout << "Output File Pfx : " << outPrefix << std::endl;
       std::cout << "Olap File Pfx   : " << olapPrefix << std::endl;
       std::cout << "Input File      : " << filenames.front() << std::endl;
-      std::cout << "Threshold       : " << threshold << std::endl;
+      std::cout << "Overlap Min     : " << minOverlap << std::endl;
       std::cout << "Block Size      : " << hash_block_size << std::endl;
       std::cout << "Block Count     : " << hash_block_count << std::endl;
       std::cout << "Kmer Length     : " << HASH_KMER_SIZE  << std::endl;
@@ -649,7 +649,7 @@ int genOlaps(mxx::comm& comm, std::string positionFile,
 
 int evalOlaps(mxx::comm& comm, std::string positionFile, 
               std::string olapPrefix, unsigned readLength,
-              uint32_t threshold){
+              uint32_t minOverlap){
 
   std::stringstream outs;
   outs << olapPrefix << "_"
@@ -683,7 +683,7 @@ int evalOlaps(mxx::comm& comm, std::string positionFile,
 
   // comparePosOverLaps(comm, positionFile, read_pairs, threshold);
 
-  compareOverLaps(comm, positionFile, readLength, read_pairs, threshold);
+  compareOverLaps(comm, positionFile, readLength, read_pairs, minOverlap);
   comm.barrier();
   auto end = std::chrono::steady_clock::now();
   auto elapsed_time  = std::chrono::duration<double, std::milli>(end - start).count();
@@ -709,7 +709,7 @@ int main(int argc, char** argv) {
   std::vector<std::string> filenames;
   std::string outPrefix;
   std::string olapPrefix;
-  uint32_t threshold;
+  uint32_t minOverlap;
   unsigned readLength;
   outPrefix.assign("./output");
   total_blocks = 0;
@@ -719,17 +719,17 @@ int main(int argc, char** argv) {
              positionFile, filenames, 
              olapPrefix, outPrefix,
              readLength,
-             threshold);
+             minOverlap);
 
   if(olapPrefix.length() > 0) {
     if(comm.rank() == 0)
       std::cout << "---- Evaluate Overlaps ----" << std::endl;
 
-    return evalOlaps(comm, positionFile, olapPrefix, readLength, threshold);
+    return evalOlaps(comm, positionFile, olapPrefix, readLength, minOverlap);
   } else {
     if(comm.rank() == 0)
       std::cout << "---- Generate Overlaps ----" << std::endl;
-    return genOlaps(comm, positionFile, filenames, outPrefix, readLength, threshold);
+    return genOlaps(comm, positionFile, filenames, outPrefix, readLength, minOverlap);
   }
 
 }
