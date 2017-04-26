@@ -39,6 +39,10 @@ struct ReadIPL{
     inline void set(T id, T pos, unsigned rl){
         rid = id; rpos = pos; rlen = rl;
     }
+    void print(std::ostream& ofs){
+        ofs << "[" << rid << " ,"
+            << rpos << ", " << rlen << "]" << std::endl;
+    }
 };
 
 #define CMP_WRAP_TEMPLATE(...) __VA_ARGS__
@@ -219,8 +223,9 @@ void loadSimulatedPosFile(const mxx::comm& comm,
 
   totalPosLines = mxx::allreduce(readPairs.size(), comm);
 
-  if(comm.rank() == 0)
+  if(comm.rank() == 0){
      std::cout << "POS DATA : " << totalPosLines << std::endl;
+  }
   if(comm.rank() == 0)
      std::cout << "---- Finish Loading SIM POS File ----" << std::endl;
 }
@@ -263,8 +268,11 @@ void loadSAMPosFile(const mxx::comm& comm,
     }
 
     auto totalRecords = mxx::allreduce(rix, comm);
-    if(comm.rank() == 0)
+    if(comm.rank() == 0){
         std::cout << "POS DATA : " << totalRecords << std::endl;
+        if(readPairs.size() > 0)
+            readPairs[0].print(std::cout);
+    }
     if(comm.rank() == 0)
        std::cout << "---- Finish Loading SAM POS File ----" << std::endl;
 }
@@ -297,6 +305,8 @@ void generateTruePairs(const mxx::comm& comm,
   if(totalPosLines == 0)
       return;
 
+  if(comm.rank() == 0)
+      std::cout << "--- Sort Begin ---" << std::endl;
   // sort by positionFile
   BL_BENCH_START(cmpr);
   comm.with_subset(
@@ -311,20 +321,17 @@ void generateTruePairs(const mxx::comm& comm,
   auto totalPosPairs = mxx::allreduce(readPosPairs.size(), comm);
   if(comm.rank() == 0)
      std::cout << "POS TOTAL : " << totalPosPairs << std::endl;
+  if(comm.rank() == 0)
+      std::cout << "--- Sort Done ---" << std::endl;
 
   BL_BENCH_START(cmpr);
 
+  if(comm.rank() == 0)
+      std::cout << "--- Shift Straddle Start ---" << std::endl;
   // get the straddling region
   uint64_t startOffset, endOffset;
-  auto posCompare = [&](const ReadIPL<T>& x,
-                        const ReadIPL<T>& y){
-      // return ((x.rpos > y.rpos) ? (x.rpos - y.rpos) :
-      //         (y.rpos - x.rpos)) < threshold;
-      T pos_delta = ((x.rpos > y.rpos) ? (x.rpos - y.rpos) :
-                     (y.rpos - x.rpos));
-      T o_delta = ((x.rlen > minOverlap) ?
-                   (x.rlen - minOverlap) : (minOverlap - x.rlen));
-      return pos_delta < o_delta ;
+  auto posCompare = [&](const ReadIPL<T>& x, const ReadIPL<T>& y){
+      return ((x.rpos + x.rlen) > (y.rpos + minOverlap)) || ((y.rpos + y.rlen) > (x.rpos + minOverlap))  ;
   };
 
   std::vector<ReadIPL<T>> straddleRegion;
@@ -332,6 +339,13 @@ void generateTruePairs(const mxx::comm& comm,
                         startOffset, endOffset,
                         straddleRegion, posCompare);
   BL_BENCH_COLLECTIVE_END(cmpr, "shift_straddle", straddleRegion.size(), comm);
+  if(comm.rank() == 0 && straddleRegion.size() > 0){
+      std::cout << "STRD";
+      readPosPairs.back().print(std::cout);
+      straddleRegion.front().print(std::cout);
+      straddleRegion.back().print(std::cout);
+      std::cout << "--- Finish Shift Straddle ---" << std::endl;
+  }
 
   BL_BENCH_START(cmpr);
   std::vector<ReadIPL<T>> localRegion;
@@ -342,12 +356,17 @@ void generateTruePairs(const mxx::comm& comm,
   std::copy(straddleRegion.begin(), straddleRegion.end(),
             localRegion.begin() + endOffset);
   std::vector<ReadIPL<T>>().swap(straddleRegion);
+  auto totalRegion = mxx::allreduce(localRegion.size(), comm);
+  if(comm.rank() == 0)
+      std::cout << "REGION TOTAL : " << totalRegion << std::endl;
   BL_BENCH_COLLECTIVE_END(cmpr, "local_region", localRegion.size(), comm);
 
+  if(comm.rank() == 0) std::cout << "--- Start Generating True Pairs" << std::endl;
   // generate pairs
   BL_BENCH_START(cmpr);
   findTruePairs(localRegion, truePairs, minOverlap);
   BL_BENCH_COLLECTIVE_END(cmpr, "true_pairs", truePairs.size(), comm);
+  if(comm.rank() == 0) std::cout << "--- Finish Generating True Pairs ---" << std::endl;
 
   BL_BENCH_START(cmpr);
   eliminateDuplicates(comm, truePairs);

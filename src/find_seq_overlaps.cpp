@@ -517,7 +517,8 @@ int parse_args(int argc, char **argv,
                 mxx::comm& comm,
                 std::string& positionFile,
                 std::vector<std::string>& filenames,
-                std::string& olapPrefix,
+                std::string& candFile,
+                std::string& trueFile,
                 std::string& outPrefix,
                 unsigned& read_length,
                uint32_t& minOverlap,
@@ -566,14 +567,19 @@ int parse_args(int argc, char **argv,
                                        "read length",
                                        false, 100, "unsigned", cmd);
 
-    // olap only
-    TCLAP::ValueArg<std::string> olapFileArg("L", "olap_prefix",
-                                             "Overlap file Prefix",
+    // candidate files only
+    TCLAP::ValueArg<std::string> candFileArg("C", "candidate_file",
+                                             "File with candidate pairs",
+                                             false, "", "string", cmd);
+
+    // true parirs files only
+    TCLAP::ValueArg<std::string> trueFileArg("R", "true_file",
+                                             "File with true pairs",
                                              false, "", "string", cmd);
 
     // input files
     TCLAP::UnlabeledMultiArg<std::string> fileArg("filenames", "FASTA or FASTQ file names",
-                                                  true, "string", cmd);
+                                                  false, "string", cmd);
 
 
     // Parse the argv array.
@@ -582,7 +588,8 @@ int parse_args(int argc, char **argv,
     runType = runTypeArg.getValue();
     positionFile = positionArg.getValue();
     outPrefix = outputArg.getValue();
-    olapPrefix = olapFileArg.getValue();
+    candFile = candFileArg.getValue();
+    trueFile = trueFileArg.getValue();
     filenames = fileArg.getValue();
     minOverlap = threshArg.getValue();
     hash_block_count = blockCountArg.getValue();
@@ -590,16 +597,23 @@ int parse_args(int argc, char **argv,
     read_length = readLengthArg.getValue();
 
     if(comm.rank() == 0){
-        std::cout << "Run Type        : "  << runType << std::endl;
-      std::cout << "Position File   : " << positionFile << std::endl;
-      std::cout << "Output File Pfx : " << outPrefix << std::endl;
-      std::cout << "Olap File Pfx   : " << olapPrefix << std::endl;
-      std::cout << "Input File      : " << filenames.front() << std::endl;
-      std::cout << "Overlap Min     : " << minOverlap << std::endl;
-      std::cout << "Block Size      : " << hash_block_size << std::endl;
-      std::cout << "Block Count     : " << hash_block_count << std::endl;
-      std::cout << "Kmer Length     : " << HASH_KMER_SIZE  << std::endl;
-      std::cout << "Read Length     : " << read_length << std::endl;
+      std::cout << "Run Type             : "  << runType << std::endl;
+      std::cout << "Position File        : " << positionFile << std::endl;
+      std::cout << "Output File Pfx      : " << outPrefix << std::endl;
+      std::cout << "Candidate Paris File : " << candFile << std::endl;
+      std::cout << "True Pairs File      : " << trueFile << std::endl;
+      std::cout << "No. Files            : " << filenames.size() << std::endl;
+      if(filenames.size() > 0){
+          std::cout << "Input File           : ";
+          for(auto& fx : filenames)
+              std::cout << "["<< fx << "] ";
+          std::cout << std::endl;
+      }
+      std::cout << "Overlap Min          : " << minOverlap << std::endl;
+      std::cout << "Block Size           : " << hash_block_size << std::endl;
+      std::cout << "Block Count          : " << hash_block_count << std::endl;
+      std::cout << "Kmer Length          : " << HASH_KMER_SIZE  << std::endl;
+      std::cout << "Read Length          : " << read_length << std::endl;
     }
   } catch (TCLAP::ArgException &e)  {
     std::cerr << "error: " << e.error() << " for arg " << e.argId() << std::endl;
@@ -685,43 +699,54 @@ int trueOlaps(mxx::comm& comm, std::string positionFile,
     return 0;
 }
 
-int evalOlaps(mxx::comm& comm, std::string positionFile, 
-              std::string olapPrefix, unsigned readLength,
-              uint32_t minOverlap){
-
-  std::stringstream outs;
-  outs << olapPrefix << "_"
-       << (comm.rank() < 10 ? "000" :
-           (comm.rank() < 100 ? "00" :
-            (comm.rank() < 1000 ? "0" : "")))
-       << comm.rank() << ".txt";
-  std::string olapFile = outs.str();
+int evalOlaps(mxx::comm& comm, std::string candFile,
+              std::string trueFile){
 
   comm.barrier();
   auto start = std::chrono::steady_clock::now();
 
-  std::vector< std::pair<uint64_t, uint64_t> > read_pairs;
-  std::ifstream fin(olapFile.c_str());
-  while(fin.good()){
-      std::string rcd;
-      std::getline(fin, rcd);
-      uint64_t rid1, rid2;
+  std::vector< std::pair<uint64_t, uint64_t> > cand_pairs, true_pairs;
+  std::size_t offsetStart, offsetEnd;
+  std::vector<string> bufferStore;
+
+  read_block(comm, candFile, offsetStart, offsetEnd, bufferStore);
+  cand_pairs.resize(bufferStore.size());
+  std::size_t ridx = 0;
+  for(auto rcd : bufferStore){
+      uint64_t p1, p2;
       std::stringstream strStream(rcd);
-      strStream >> rid1;
-      strStream >> rid2;
-      read_pairs.push_back(std::make_pair(rid1, rid2));
+      strStream >> p1;
+      strStream >> p2;
+      cand_pairs[ridx] = std::make_pair(p1, p2);
+      ridx++;
   }
-  fin.close();
 
-  std::vector<std::pair<uint64_t,uint64_t>>(read_pairs).swap(read_pairs);
+  bufferStore.clear();
+  std::vector<std::string>().swap(bufferStore);
 
-  auto totalPairs = mxx::allreduce(read_pairs.size(), comm);
+  read_block(comm, trueFile, offsetStart, offsetEnd, bufferStore);
+  true_pairs.resize(bufferStore.size());
+  ridx = 0;
+  for(auto rcd : bufferStore){
+      uint64_t p1, p2;
+      std::stringstream strStream(rcd);
+      strStream >> p1;
+      strStream >> p2;
+      true_pairs[ridx] = std::make_pair(p1, p2);
+      ridx++;
+  }
+  bufferStore.clear();
+  std::vector<std::string>().swap(bufferStore);
+
+  auto totalPairs = mxx::allreduce(cand_pairs.size(), comm);
   if(comm.rank() == 0)
-     std::cout << "COMPUTED TOTAL : " << totalPairs << std::endl;
+     std::cout << "CANDIDATE TOTAL : " << totalPairs << std::endl;
+  totalPairs = mxx::allreduce(true_pairs.size(), comm);
+  if(comm.rank() == 0)
+      std::cout << "TRUE TOTAL : " << totalPairs << std::endl;
 
-  // comparePosOverLaps(comm, positionFile, read_pairs, threshold);
+  computeSetDifference(comm, cand_pairs, true_pairs);
 
-  compareOverLaps(comm, positionFile, readLength, read_pairs, minOverlap);
   comm.barrier();
   auto end = std::chrono::steady_clock::now();
   auto elapsed_time  = std::chrono::duration<double, std::milli>(end - start).count();
@@ -746,7 +771,8 @@ int main(int argc, char** argv) {
   std::string positionFile;
   std::vector<std::string> filenames;
   std::string outPrefix;
-  std::string olapPrefix;
+  std::string candFile;
+  std::string trueFile;
   uint32_t minOverlap;
   unsigned readLength;
   std::string rType;
@@ -756,7 +782,7 @@ int main(int argc, char** argv) {
   // parse arguments
   if(parse_args(argc, argv, comm,
                 positionFile, filenames,
-                olapPrefix, outPrefix,
+                candFile, trueFile, outPrefix,
                 readLength,
                 minOverlap, rType) != 0)
       return 1;
@@ -768,7 +794,7 @@ int main(int argc, char** argv) {
   } else if(rType == "eval") {
     if(comm.rank() == 0)
       std::cout << "---- Evaluate Overlaps ----" << std::endl;
-    return evalOlaps(comm, positionFile, olapPrefix, readLength, minOverlap);
+    return evalOlaps(comm, candFile, trueFile );
   } else {
     if(comm.rank() == 0)
       std::cout << "---- Generate candidate Overlaps ----" << std::endl;
