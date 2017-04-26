@@ -513,14 +513,15 @@ void runFSO(mxx::comm& comm,
   BL_BENCH_REPORT_MPI_NAMED(rfso, "rfso_app", comm);
 }
 
-void parse_args(int argc, char **argv,
+int parse_args(int argc, char **argv,
                 mxx::comm& comm,
                 std::string& positionFile,
                 std::vector<std::string>& filenames,
                 std::string& olapPrefix,
                 std::string& outPrefix,
                 unsigned& read_length,
-                uint32_t& minOverlap){
+               uint32_t& minOverlap,
+               std::string& runType){
   try { // try-catch block for commandline
 
     TCLAP::CmdLine cmd("Overlap Graph Construction", ' ', "0.1");
@@ -529,10 +530,14 @@ void parse_args(int argc, char **argv,
     bliss::utils::tclap::MPIOutput cmd_output(comm);
     cmd.setOutput(&cmd_output);
 
-   // position file argument
-    TCLAP::ValueArg<std::string> positionArg("p", "position_file",
+    // position file argument
+    TCLAP::ValueArg<std::string> runTypeArg("t", "run_type",
+                                            "Type of run : One of 'candidate', 'true', 'eval' ",
+                                            true, "", "string", cmd);
+
+   TCLAP::ValueArg<std::string> positionArg("p", "position_file",
                                              "Position for input file (full path)",
-                                             true, "", "string", cmd);
+                                             false, "", "string", cmd);
 
 
 
@@ -574,6 +579,7 @@ void parse_args(int argc, char **argv,
     // Parse the argv array.
     cmd.parse( argc, argv );
 
+    runType = runTypeArg.getValue();
     positionFile = positionArg.getValue();
     outPrefix = outputArg.getValue();
     olapPrefix = olapFileArg.getValue();
@@ -584,6 +590,7 @@ void parse_args(int argc, char **argv,
     read_length = readLengthArg.getValue();
 
     if(comm.rank() == 0){
+        std::cout << "Run Type        : "  << runType << std::endl;
       std::cout << "Position File   : " << positionFile << std::endl;
       std::cout << "Output File Pfx : " << outPrefix << std::endl;
       std::cout << "Olap File Pfx   : " << olapPrefix << std::endl;
@@ -594,11 +601,18 @@ void parse_args(int argc, char **argv,
       std::cout << "Kmer Length     : " << HASH_KMER_SIZE  << std::endl;
       std::cout << "Read Length     : " << read_length << std::endl;
     }
-
   } catch (TCLAP::ArgException &e)  {
     std::cerr << "error: " << e.error() << " for arg " << e.argId() << std::endl;
-    exit(-1);
+    return 1;
   }
+
+  if(runType.length() == 0)
+      return 1;
+  if(runType != "true" && runType != "candidate" && runType != "eval"){
+      return 1;
+  }
+  // validate
+  return 0;
 }
 
 
@@ -645,6 +659,30 @@ int genOlaps(mxx::comm& comm, std::string positionFile,
   if(comm.rank() == 0)
     std::cout << "--------------------------------------" << std::endl;
   return 0;
+}
+
+int trueOlaps(mxx::comm& comm, std::string positionFile,
+              std::string outPrefix, unsigned readLength,
+              uint32_t minOverlap){
+
+    // generate true pairs
+    std::vector<std::pair<uint64_t, uint64_t>> truePairs;
+    generateTruePairs(comm, positionFile, readLength, minOverlap, truePairs);
+
+    std::stringstream outs;
+    outs << outPrefix << "_"
+         << (comm.rank() < 10 ? "000" :
+             (comm.rank() < 100 ? "00" :
+              (comm.rank() < 1000 ? "0" : "")))
+         << comm.rank() << ".txt";
+
+    std::string outputFile = outs.str();
+    std::ofstream ofs(outputFile);
+    if(ofs.good())
+        for(auto px : truePairs)
+            ofs << px.first << " " << px.second << std::endl;
+
+    return 0;
 }
 
 int evalOlaps(mxx::comm& comm, std::string positionFile, 
@@ -711,25 +749,30 @@ int main(int argc, char** argv) {
   std::string olapPrefix;
   uint32_t minOverlap;
   unsigned readLength;
+  std::string rType;
   outPrefix.assign("./output");
   total_blocks = 0;
   processed_blocks = 0;
   // parse arguments
-  parse_args(argc, argv, comm,
-             positionFile, filenames, 
-             olapPrefix, outPrefix,
-             readLength,
-             minOverlap);
+  if(parse_args(argc, argv, comm,
+                positionFile, filenames,
+                olapPrefix, outPrefix,
+                readLength,
+                minOverlap, rType) != 0)
+      return 1;
 
-  if(olapPrefix.length() > 0) {
+  if(rType == "true"){
+      if(comm.rank() == 0)
+          std::cout << "---- Generate True Overlaps ----" << std::endl;
+      return trueOlaps(comm, positionFile, outPrefix, readLength, minOverlap);
+  } else if(rType == "eval") {
     if(comm.rank() == 0)
       std::cout << "---- Evaluate Overlaps ----" << std::endl;
-
     return evalOlaps(comm, positionFile, olapPrefix, readLength, minOverlap);
   } else {
     if(comm.rank() == 0)
-      std::cout << "---- Generate Overlaps ----" << std::endl;
+      std::cout << "---- Generate candidate Overlaps ----" << std::endl;
     return genOlaps(comm, positionFile, filenames, outPrefix, readLength, minOverlap);
   }
-
+  return 0;
 }
