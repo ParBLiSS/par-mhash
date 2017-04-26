@@ -709,6 +709,7 @@ int evalOlaps(mxx::comm& comm, std::string candFile,
   std::size_t offsetStart, offsetEnd;
   std::vector<string> bufferStore;
 
+  compute_offsets(comm, candFile, offsetStart, offsetEnd);
   read_block(comm, candFile, offsetStart, offsetEnd, bufferStore);
   cand_pairs.resize(bufferStore.size());
   std::size_t ridx = 0;
@@ -724,6 +725,7 @@ int evalOlaps(mxx::comm& comm, std::string candFile,
   bufferStore.clear();
   std::vector<std::string>().swap(bufferStore);
 
+  compute_offsets(comm, trueFile, offsetStart, offsetEnd);
   read_block(comm, trueFile, offsetStart, offsetEnd, bufferStore);
   true_pairs.resize(bufferStore.size());
   ridx = 0;
