@@ -107,7 +107,7 @@ struct ReadMinHashBlock{
     }
 
     bool is_good(){
-        return (seq_id < std::numeric_limits<std::size_t>::max());
+        return (hash_values[0] < std::numeric_limits<HashValueType>::max());
     }
 
     void print(std::ostream& ofs){
@@ -205,11 +205,11 @@ struct SeqMinHashGenerator {
         bliss::partition::range<size_t> seq_range(
             read.seq_global_offset(), read.seq_global_offset() + read.seq_size());
         value_type hrv;
+        hrv.seq_id = read.id.get_pos();
         if(read.seq_size() < read_threshold){
            *output_iter = hrv;
            return output_iter;
         }
-        hrv.seq_id = read.id.get_pos();
         if (seq_range.contains(valid_range.end)) {
             // seq_range contains overlap.
             // not checking by end iterator at valid_range.end, since the NonEOLIter
@@ -392,12 +392,6 @@ void generateSequencePairs(mxx::comm& comm,
     parse_file_data<SeqMinHashGeneratorType, FileParser,
                     SeqIterType>(file_data, local_rhpairs, comm);
 
-  std::size_t j = 0;
-  for(std::size_t i = 0; i < local_rhpairs.size();i++)
-    if(local_rhpairs[i].is_good())
-       local_rhpairs[j++] = local_rhpairs[i];
-  local_rhpairs.resize(j);
-
   BL_BENCH_COLLECTIVE_END(genpr, "compute_hash", local_rhpairs.size(), comm);
 
   BL_BENCH_START(genpr);
@@ -413,6 +407,12 @@ void generateSequencePairs(mxx::comm& comm,
     seq_idx -= local_rhpairs.size();
   for(auto fitr = local_rhpairs.begin(); fitr != local_rhpairs.end(); fitr++, seq_idx++)
     fitr->seq_id = seq_idx;
+
+  std::size_t j = 0;
+  for(std::size_t i = 0; i < local_rhpairs.size();i++)
+      if(local_rhpairs[i].is_good())
+          local_rhpairs[j++] = local_rhpairs[i];
+  local_rhpairs.resize(j);
 
   BL_BENCH_COLLECTIVE_END(genpr, "assign_ids", local_rhpairs.size(), comm);
 
