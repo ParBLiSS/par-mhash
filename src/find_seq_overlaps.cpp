@@ -379,6 +379,7 @@ template<typename T>
 void generateSequencePairs(mxx::comm& comm,
                            bliss::io::file_data& file_data,
                            std::vector< std::pair<T, T> >& read_pairs) {
+    static std::size_t gs_idx = 0;
   BL_BENCH_INIT(genpr);
   BL_BENCH_START(genpr);
 
@@ -394,13 +395,32 @@ void generateSequencePairs(mxx::comm& comm,
 
   BL_BENCH_COLLECTIVE_END(genpr, "compute_hash", local_rhpairs.size(), comm);
 
+  auto totalPairs = mxx::allreduce(local_rhpairs.size(), comm);
+  if(comm.rank() == 0)
+      std::cout << gs_idx << " : NR1 : " << totalPairs;
+
   BL_BENCH_START(genpr);
   auto cmp_fn = [&](const RHBType& x, const RHBType& y){
     return (x.seq_id < y.seq_id);
   };
-  if(!mxx::is_sorted(local_rhpairs.begin(), local_rhpairs.end(),
-                     cmp_fn, comm))
+
+  bool isSorted = mxx::is_sorted(local_rhpairs.begin(), local_rhpairs.end(),
+                                 cmp_fn, comm);
+  if(comm.rank() == 0)
+      std::cout << " : SRT1 : " << (isSorted ? "Y" : "N");
+
+  if(!isSorted)
     mxx::sort(local_rhpairs.begin(), local_rhpairs.end(), cmp_fn, comm);
+
+  isSorted = mxx::is_sorted(local_rhpairs.begin(), local_rhpairs.end(),
+                            cmp_fn, comm);
+  if(comm.rank() == 0)
+      std::cout << " : SRT2 : " << (isSorted ? "Y" : "N");
+
+  totalPairs = mxx::allreduce(local_rhpairs.size(), comm);
+  if(comm.rank() == 0)
+      std::cout << " : NR2 : " << totalPairs << std::endl;
+
 
   auto seq_idx = mxx::scan(local_rhpairs.size(), comm);
   if(local_rhpairs.size() > 0)
@@ -413,6 +433,10 @@ void generateSequencePairs(mxx::comm& comm,
       if(local_rhpairs[i].is_good())
           local_rhpairs[j++] = local_rhpairs[i];
   local_rhpairs.resize(j);
+
+  totalPairs = mxx::allreduce(local_rhpairs.size(), comm);
+  if(comm.rank() == 0)
+      std::cout << " : NR3 : " << totalPairs << std::endl;
 
   BL_BENCH_COLLECTIVE_END(genpr, "assign_ids", local_rhpairs.size(), comm);
 
@@ -442,6 +466,7 @@ void generateSequencePairs(mxx::comm& comm,
       });
   BL_BENCH_COLLECTIVE_END(genpr, "pair_gen", max_block_size, comm);
   BL_BENCH_REPORT_MPI_NAMED(genpr, "genpair", comm);
+  gs_idx++;
 }
 
 template<typename T=uint64_t>
@@ -453,9 +478,15 @@ void runFSO(mxx::comm& comm,
             uint32_t minOverlap){
 
   // Read files
+  if(comm.rank() == 0){
+        std::cout << " Min Overlap       : " << minOverlap
+                  << " Block Size      : " << hash_block_size
+                  << " Block Count     : " << hash_block_count
+                  << " Kmer Length     : " << HASH_KMER_SIZE  << std::endl;
+  }
+
   BL_BENCH_INIT(rfso);
   std::vector<::bliss::io::file_data> file_data;
-  size_t total = 0;
 
   BL_BENCH_START(rfso);
   load_file_data(comm, inFiles, file_data);
@@ -479,37 +510,40 @@ void runFSO(mxx::comm& comm,
   if(comm.rank()  == 0)
       std::cout << "FINAL PAIR COUNT : " << totalHashPairs << std::endl;
   std::vector<bliss::io::file_data>().swap(file_data);
-
-
-  BL_BENCH_START(rfso);
-  if(comm.rank() == 0){
-      std::cout << " Min Overlap       : " << minOverlap
-                << " Block Size      : " << hash_block_size 
-                << " Block Count     : " << hash_block_count
-                << " Kmer Length     : " << HASH_KMER_SIZE  << std::endl;
-  }
-
-  std::stringstream outs;
-  outs << outPrefix << "_"
-       << (comm.rank() < 10 ? "000" :
-           (comm.rank() < 100 ? "00" :
-            (comm.rank() < 1000 ? "0" : "")))
-       << comm.rank() << ".txt";
-
-  std::string outputFile = outs.str();
-  std::ofstream ofs(outputFile);
-  if(ofs.good())
-      for(auto px : read_pairs)
-          ofs << px.first << " " << px.second << std::endl;
-
-  compareOverLaps(comm, positionFile, readLength, read_pairs,  minOverlap);
-  BL_BENCH_COLLECTIVE_END(rfso, "compare_overlaps", read_pairs.size(), comm);
   comm.barrier();
   auto end = std::chrono::steady_clock::now();
   auto elapsed_time  = std::chrono::duration<double, std::milli>(end - start).count();
 
   if(!comm.rank())
       std::cout << "PGEN TIME (ms)  : " << elapsed_time << std::endl;
+
+  comm.barrier();
+  start = std::chrono::steady_clock::now();
+  if(outPrefix.length() > 0) {
+      std::stringstream outs;
+      outs << outPrefix << "_"
+           << (comm.rank() < 10 ? "000" :
+               (comm.rank() < 100 ? "00" :
+                (comm.rank() < 1000 ? "0" : "")))
+           << comm.rank() << ".txt";
+
+      std::string outputFile = outs.str();
+      std::ofstream ofs(outputFile);
+      if(ofs.good())
+          for(auto px : read_pairs)
+              ofs << px.first << " " << px.second << std::endl;
+  }
+  comm.barrier();
+  end = std::chrono::steady_clock::now();
+  elapsed_time  = std::chrono::duration<double, std::milli>(end - start).count();
+  if(!comm.rank())
+      std::cout << "WRITE OUTPUT (ms)  : " << elapsed_time << std::endl;
+
+
+  BL_BENCH_START(rfso);
+  if(positionFile.length() > 0)
+      compareOverLaps(comm, positionFile, readLength, read_pairs,  minOverlap);
+  BL_BENCH_COLLECTIVE_END(rfso, "compare_overlaps", read_pairs.size(), comm);
   BL_BENCH_REPORT_MPI_NAMED(rfso, "rfso_app", comm);
 }
 
