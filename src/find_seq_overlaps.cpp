@@ -419,7 +419,7 @@ void generateSequencePairs(mxx::comm& comm,
 
   totalPairs = mxx::allreduce(local_rhpairs.size(), comm);
   if(comm.rank() == 0)
-      std::cout << " : NR2 : " << totalPairs << std::endl;
+      std::cout << " : NR2 : " << totalPairs;
 
 
   auto seq_idx = mxx::scan(local_rhpairs.size(), comm);
