@@ -718,7 +718,10 @@ int evalOlaps(mxx::comm& comm, std::string candFile,
       std::stringstream strStream(rcd);
       strStream >> p1;
       strStream >> p2;
-      cand_pairs[ridx] = std::make_pair(p1, p2);
+      if(p1 < p2)
+          cand_pairs[ridx] = std::make_pair(p1, p2);
+      else
+          cand_pairs[ridx] = std::make_pair(p2, p1);
       ridx++;
   }
 
@@ -734,18 +737,24 @@ int evalOlaps(mxx::comm& comm, std::string candFile,
       std::stringstream strStream(rcd);
       strStream >> p1;
       strStream >> p2;
-      true_pairs[ridx] = std::make_pair(p1, p2);
+      if(p1 < p2)
+          true_pairs[ridx] = std::make_pair(p1, p2);
+      else
+          true_pairs[ridx] = std::make_pair(p2, p1);
       ridx++;
   }
   bufferStore.clear();
   std::vector<std::string>().swap(bufferStore);
 
+  eliminateDuplicates(comm, cand_pairs);
+  eliminateDuplicates(comm, true_pairs);
+
   auto totalPairs = mxx::allreduce(cand_pairs.size(), comm);
   if(comm.rank() == 0)
-     std::cout << "CANDIDATE TOTAL : " << totalPairs << std::endl;
+      std::cout << " CANDIDATE TOTAL         : " << totalPairs << std::endl;
   totalPairs = mxx::allreduce(true_pairs.size(), comm);
   if(comm.rank() == 0)
-      std::cout << "TRUE TOTAL : " << totalPairs << std::endl;
+      std::cout << " TRUE TOTAL              : " << totalPairs << std::endl;
 
   computeSetDifference(comm, cand_pairs, true_pairs);
 

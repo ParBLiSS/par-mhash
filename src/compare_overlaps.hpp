@@ -435,16 +435,22 @@ void computeSetDifference(const mxx::comm& comm,
     auto inTruth = mxx::allreduce(setDiff[1], comm);
     auto totalIntersect = mxx::allreduce(intersectPairs, comm);
     if(comm.rank() == 0){
-        float fpRatio, fnRatio;
+        float tpRatio, fpRatio, fnRatio;
         fnRatio = (float) inTruth;
         fnRatio /= (float)(inTruth + totalIntersect);
         fpRatio = (float) inCandidates;
         fpRatio /= (float)(totalIntersect);
-        std::cout << "|CANDIDATES \\   TRUTH|  : " << inCandidates;
-        std::cout << " |TRUTH \\   CANDIDATES|  : " << inTruth;
-        std::cout << " |TRUTH \\cup CANDIDATES|  : " << totalIntersect;
-        std::cout << " FN Ratio : "  << fnRatio;
-        std::cout << " FP Ratio : "  << fpRatio << std::endl;
+        tpRatio = (float) totalIntersect;
+        tpRatio /= (float)(inTruth + totalIntersect);
+        std::cout << " |CANDIDATES \\   TRUTH|  : " << inCandidates
+                  << std::endl;
+        std::cout << " |TRUTH \\   CANDIDATES|  : " << inTruth
+                  << std::endl;
+        std::cout << " |TRUTH \\cap CANDIDATES| : " << totalIntersect 
+                  << std::endl;
+        std::cout << " TP Ratio                : "  << tpRatio << std::endl;
+        std::cout << " FN Ratio                : "  << fnRatio << std::endl;
+        std::cout << " FP Ratio                : "  << fpRatio << std::endl;
     }
     BL_BENCH_COLLECTIVE_END(cmpr, "count_setdiff", truePairs.size(), comm);
     BL_BENCH_REPORT_MPI_NAMED(cmpr, "cmpr_app", comm);
