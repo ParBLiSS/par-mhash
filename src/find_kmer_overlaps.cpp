@@ -79,13 +79,6 @@ using StoreHash = bliss::kmer::hash::farm<KM, false>;
 
 template <typename Key>
 using MapParams = ::bliss::index::kmer::CanonicalHashMapParams<Key, DistHash, StoreHash>;
-using SpecialKeys = ::bliss::kmer::hash::sparsehash::special_keys<KmerType, true>;
-
-//using MapType = dsc::densehash_multimap<KmerType, ValType, MapParams, SpecialKeys>;
-using MapType = dsc::unordered_multimap<KmerType, ValType, MapParams>;
-//using MapType = dsc::unordered_multimap<KmerType, ValType, MapParams>;
-//using MapType = dsc::unordered_multimap_compact_vec<KmerType, ValType, MapParams>;
-
 
 /**
  * @tparam TupleType       output value type of this parser.  not necessarily the same as the map's final storage type.
@@ -220,21 +213,19 @@ struct KmerSeqTupleParser {
 
 // using MapType = ::dsc::unordered_multimap_hashvec<
 //  KmerType, ValType, MapParams>;
-using SeqPositionIndexType = bliss::index::kmer::Index<MapType,
-                                                       KmerSeqTupleParser<std::pair<typename MapType::key_type,
-                                                                                    typename MapType::mapped_type> > >;
 
-
+template<typename KT>
 std::size_t getReadsCount(mxx::comm& comm, bliss::io::file_data& file_data){
 
   std::vector<char> vx;
   bliss::io::KmerFileHelper::template
-    parse_file_data<ReadsCountParser<KmerType>, FileParser,
+    parse_file_data<ReadsCountParser<KT>, FileParser,
                     SeqIterType>(file_data, vx, comm);
 
   return vx.size();
 }
 
+template<typename SeqPositionIndexType>
 void constructIndex(mxx::comm& comm, bliss::io::file_data& file_data,
                     SeqPositionIndexType& seqIdx){
   std::vector<typename SeqPositionIndexType::TupleType> tmp;
@@ -272,27 +263,41 @@ uint64_t generatePairs(const mxx::comm& comm,
     return nsize;
 }
 
-template<typename T=uint64_t>
+template<typename T, typename KT>
 void runKSO(mxx::comm& comm,
             std::string positionFile,
             std::vector<std::string>& inFiles,
             std::string outPrefix,
             uint32_t threshold){
+
+//using SpecialKeys = ::bliss::kmer::hash::sparsehash::special_keys<KmerType, true>;
+
+//using MapType = dsc::densehash_multimap<KmerType, ValType, MapParams, SpecialKeys>;
+    using MapType = dsc::unordered_multimap<KT, ValType, MapParams>;
+//using MapType = dsc::unordered_multimap<KmerType, ValType, MapParams>;
+//using MapType = dsc::unordered_multimap_compact_vec<KmerType, ValType, MapParams>;
+
+
+    using SeqPositionIndexType = bliss::index::kmer::Index<MapType,
+                                                           KmerSeqTupleParser<std::pair<typename MapType::key_type,
+                                                                                        typename MapType::mapped_type> > >;
+
+
     BL_BENCH_INIT(kfso);
     std::vector<::bliss::io::file_data> file_data;
     size_t total = 0;
 
     BL_BENCH_START(kfso);
-    load_file_data(comm, inFiles, file_data);
+    load_file_data<KT>(comm, inFiles, file_data);
     BL_BENCH_COLLECTIVE_END(kfso, "read_files", total, comm);
 
     BL_BENCH_START(kfso);
-    auto nLocalReads = getReadsCount(comm, file_data.back());
+    auto nLocalReads = getReadsCount<KT>(comm, file_data.back());
     readStartIndex = mxx::scan(nLocalReads, comm);
     if(nLocalReads > 0)
         readStartIndex -= nLocalReads;
     SeqPositionIndexType seqIdx(comm);
-    constructIndex(comm, file_data.back(), seqIdx);
+    constructIndex<SeqPositionIndexType>(comm, file_data.back(), seqIdx);
     //auto txval = std::distance(seqIdx.get_map().get_local_container().begin(), seqIdx.get_map().get_local_container().end());
     BL_BENCH_COLLECTIVE_END(kfso, "build_index", read_pairs.size(), comm);
     auto rval = mxx::allreduce(seqIdx.size(), comm);
@@ -446,7 +451,7 @@ int main(int argc, char** argv) {
   comm.barrier();
   auto start = std::chrono::steady_clock::now();
 
-  runKSO(comm, positionFile, filenames, outPrefix, threshold);
+  runKSO<uint64_t, KmerType16>(comm, positionFile, filenames, outPrefix, threshold);
 
   comm.barrier();
   auto end = std::chrono::steady_clock::now();

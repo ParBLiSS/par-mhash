@@ -11,9 +11,6 @@
 #include "io/filtered_sequence_iterator.hpp"
 #include "utils/file_utils.hpp"
 
-const static std::size_t hash_block_size = 2;
-static std::size_t hash_block_count = 250;
-static std::size_t hash_seeds_size;
 
 #if (pDNA == 4)
 using Alphabet = bliss::common::DNA;
@@ -24,14 +21,6 @@ using Alphabet = bliss::common::DNA16;
 #endif
 
 // constants
-#ifndef HASH_KMER_SIZE
-#define HASH_KMER_SIZE 16
-#endif
-
-#ifndef READ_THRESHOLD
-#define READ_THRESHOLD 1000
-#endif
-
 #if (pPARSER == FASTQ)
 #define FileParser bliss::io::FASTQParser
 #elif (pPARSER == FASTA)
@@ -44,7 +33,8 @@ using FileReaderType = bliss::io::parallel::partitioned_file<
 
 // Kmer, FilerReader and Iterator data types
 using EdgeEncoding = Alphabet;
-using KmerType = bliss::common::Kmer<HASH_KMER_SIZE, Alphabet, WordType>;
+using KmerType8 = bliss::common::Kmer<8, Alphabet, WordType>;
+using KmerType16 = bliss::common::Kmer<16, Alphabet, WordType>;
 
 template <typename Iterator, template <typename> class SeqParser>
 using SeqIterType = bliss::io::SequencesIterator<Iterator, SeqParser>;
@@ -54,7 +44,12 @@ using NonEOLIter = bliss::iterator::filter_iterator<bliss::utils::file::NotEOL, 
 
 // Hash Value types
 using HashValueType = uint64_t;
-using HashBlockType = std::array<HashValueType, hash_block_size>;
+//using HashBlockType = std::array<HashValueType, hash_block_size>;
+using HashBlockType2 = std::array<HashValueType, 2>;
+using HashBlockType3 = std::array<HashValueType, 3>;
+using HashBlockType4 = std::array<HashValueType, 4>;
+using HashBlockType5 = std::array<HashValueType, 5>;
+// using HashBlockType = std::vector<HashValueType>;
 
 #define WRAP_TEMPLATE(...) __VA_ARGS__
 

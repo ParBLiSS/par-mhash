@@ -108,14 +108,14 @@ struct ReadLengthGenerator {
 };
 
 
-template<typename T>
+template<typename T, typename KT>
 void generateSequenceLengths(mxx::comm& comm,
                              bliss::io::file_data& file_data,
                              std::vector<T>& read_pairs) {
   BL_BENCH_INIT(genpr);
   BL_BENCH_START(genpr);
 
-  using ReadLengthGeneratorType =  ReadLengthGenerator<T, KmerType>;
+  using ReadLengthGeneratorType =  ReadLengthGenerator<T, KT>;
   std::vector<T>  local_pairs;
   auto cmp_fn = [&](const T& x, const T& y){
       return (x < y);
@@ -151,7 +151,7 @@ void generateSequenceLengths(mxx::comm& comm,
   // std::vector<T>(read_pairs).swap(read_pairs);
 }
 
-template<typename T=uint64_t>
+template<typename T, typename KT>
 void runFSO(mxx::comm& comm,
             std::vector<std::string>& inFiles,
             std::string outFile,
@@ -162,7 +162,7 @@ void runFSO(mxx::comm& comm,
   std::vector<::bliss::io::file_data> file_data;
 
   BL_BENCH_START(rfso);
-  load_file_data(comm, inFiles, file_data);
+  load_file_data<KT>(comm, inFiles, file_data);
   BL_BENCH_COLLECTIVE_END(rfso, "read_files", total, comm);
 
   comm.barrier();
@@ -170,7 +170,7 @@ void runFSO(mxx::comm& comm,
   BL_BENCH_START(rfso);
   std::vector<T> read_pairs;
   for(auto i =0u; i < file_data.size(); i++)
-      generateSequenceLengths(comm, file_data[i], read_pairs);
+      generateSequenceLengths<T, KT>(comm, file_data[i], read_pairs);
   BL_BENCH_COLLECTIVE_END(rfso, "all_pairs", read_pairs.size(), comm);
 
   auto totalLengths = mxx::allreduce(read_pairs.size());
@@ -186,7 +186,7 @@ void runFSO(mxx::comm& comm,
   BL_BENCH_START(rfso);
   if(comm.rank() == 0){
       std::cout << " Threshold       : " << binSize
-                << " Kmer Length     : " << HASH_KMER_SIZE  << std::endl;
+                << " Kmer Length     : " << KT::size  << std::endl;
   }
   std::ofstream outf(outFile, std::ofstream::out);
   for(auto rx : read_pairs)
@@ -276,7 +276,7 @@ int main(int argc, char** argv) {
   comm.barrier();
   auto start = std::chrono::steady_clock::now();
 
-  runFSO(comm, filenames, outputFile, threshold);
+  runFSO<uint64_t, KmerType16>(comm, filenames, outputFile, threshold);
   //std::vector< std::pair<uint64_t, uint64_t> > read_pairs;
   //compareOverLaps(comm, positionFile, read_pairs, threshold);
 
