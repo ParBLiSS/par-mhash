@@ -815,10 +815,14 @@ int genOlaps(mxx::comm& comm) {
   int aidx = (run_params.kmer_length - run_params.min_kmer_length) *
       (1 + run_params.max_hash_block_size - run_params.min_hash_block_size);
   aidx += (run_params.hash_block_size - run_params.min_hash_block_size);
-  if(comm.rank() == 0)
-      std::cout << "AIDX : " << aidx << std::endl;
+  if(comm.rank() == 0){
+      std::cout << "AIDX : " << aidx << " "
+                << FSO_FN_ARRAY.size() <<  " "
+                << ((bool)FSO_FN_ARRAY[aidx]) << " " << std::endl;
+  }
 
-  if(aidx > 0 && aidx < FSO_FN_ARRAY.size() && FSO_FN_ARRAY[aidx])
+
+  if(aidx >= 0 && aidx < FSO_FN_ARRAY.size() && ((bool)FSO_FN_ARRAY[aidx]))
       FSO_FN_ARRAY[aidx](comm);
 
   // runFSO<uint64_t, 21, 3>(comm, positionFile, filenames,
