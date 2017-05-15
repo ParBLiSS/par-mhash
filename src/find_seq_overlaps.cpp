@@ -28,17 +28,44 @@
 /// Hash Function Seed Values
 #include "hash_seeds.hpp"
 
-static uint64_t total_blocks = 0;
-static uint64_t processed_blocks = 0;
-static unsigned read_threshold = 1000;
-const static int min_kmer_length = 8;
-const static int max_kmer_length = 21;
-const static int min_hash_block_size = 2;
-const static int max_hash_block_size = 5;
-static int hash_block_size = 2;
-static int hash_block_count = 250;
-static int kmer_length = 16;
-static int hash_seeds_size;
+static struct RunArgs{
+
+    RunArgs():min_kmer_length(8),
+              max_kmer_length(21),
+              min_hash_block_size(2),
+              max_hash_block_size(5),
+              total_blocks(0),
+              processed_blocks(0),
+              read_threshold(1000),
+              hash_block_size(2),
+              hash_block_count(250),
+              kmer_length(16),
+              read_length(100),
+              maxBucketSize(-1){}
+
+    const int min_kmer_length;
+    const int max_kmer_length;
+    const int min_hash_block_size;
+    const int max_hash_block_size;
+    uint64_t total_blocks;
+    uint64_t processed_blocks;
+    unsigned read_threshold;
+    int hash_block_size;
+    int hash_block_count;
+    int kmer_length;
+    unsigned read_length;
+    int maxBucketSize;
+
+    int hash_seeds_size;
+    std::string positionFile;
+    std::vector<std::string> filenames;
+    std::string candFile;
+    std::string trueFile;
+    std::string outPrefix;
+    uint32_t minOverlap;
+    std::string runType;
+
+} run_params;
 
 //
 // @brief Kmer specialization for MurmurHash.  generated hash is 128 bit.
@@ -88,8 +115,8 @@ struct MinHashFunctionBlock {
 
         HBT hbx;
         // std::cout << tx.getData()[0] << " ";
-        auto sdx = sidx * hash_block_size;
-        for(auto i = 0; (i < hbx.size()) && (sdx < hash_seeds_size);
+        auto sdx = sidx * run_params.hash_block_size;
+        for(auto i = 0; (i < hbx.size()) && (sdx < run_params.hash_seeds_size);
             i++, sdx++){
             // std::cout << hrx[i] << " ";
             hbx[i] = mmur_obj(tx, hash_seed_values[sdx]);
@@ -218,7 +245,7 @@ struct SeqMinHashGenerator {
             read.seq_global_offset(), read.seq_global_offset() + read.seq_size());
         value_type hrv;
         hrv.seq_id = read.id.get_pos();
-        if(read.seq_size() < read_threshold){
+        if(read.seq_size() < run_params.read_threshold){
            *output_iter = hrv;
            return output_iter;
         }
@@ -261,7 +288,9 @@ uint64_t generatePairs(const mxx::comm& comm,
                        std::vector<std::pair<ReadIdType, ReadIdType>>& read_pairs){
     uint64_t nsize = std::distance(start_itr, end_itr);
     //auto start = std::chrono::steady_clock::now();
-    //if(nsize > 150) return 0;
+    // limit the maximum size of bucket
+    if(run_params.maxBucketSize > 0 && nsize > run_params.maxBucketSize)
+        return 0;
     for(auto outer_itr = start_itr; outer_itr != end_itr; outer_itr++){
         for(auto inner_itr = outer_itr + 1; inner_itr != end_itr; inner_itr++){
             if(outer_itr->seq_id == inner_itr->seq_id) continue;
@@ -481,12 +510,13 @@ void generateSequencePairs(mxx::comm& comm,
 }
 
 template<typename T, int KMER_LENGTH, int BLOCK_SIZE>
-void runFSO(mxx::comm& comm,
-            std::string positionFile,
-            std::vector<std::string>& inFiles,
-            std::string outPrefix,
-            unsigned readLength,
-            uint32_t minOverlap){
+void runFSO(mxx::comm& comm){
+
+    std::string positionFile = run_params.positionFile;;
+    std::vector<std::string>& inFiles = run_params.filenames;
+    std::string outPrefix = run_params.outPrefix;
+    unsigned readLength = run_params.read_length;
+    uint32_t minOverlap = run_params.minOverlap;
 
     using KT = bliss::common::Kmer<KMER_LENGTH, Alphabet, WordType>;
     using HBT = std::array<HashValueType, BLOCK_SIZE>;
@@ -494,9 +524,9 @@ void runFSO(mxx::comm& comm,
   // Read files
   if(comm.rank() == 0){
         std::cout << " Min Overlap       : " << minOverlap
-                  << " Block Size      : " << hash_block_size
-                  << " Block Count     : " << hash_block_count
-                  << " Kmer Length     : " << kmer_length << std::endl;
+                  << " Block Size      : " << run_params.hash_block_size
+                  << " Block Count     : " << run_params.hash_block_count
+                  << " Kmer Length     : " << run_params.kmer_length << std::endl;
   }
 
   BL_BENCH_INIT(rfso);
@@ -510,8 +540,8 @@ void runFSO(mxx::comm& comm,
   auto start = std::chrono::steady_clock::now();
   BL_BENCH_START(rfso);
   std::vector< std::pair<T, T> > read_pairs;
-  for(auto i = 0u; i < hash_block_count; i++){
-      if(seed_index >= (hash_block_count)){
+  for(auto i = 0u; i < run_params.hash_block_count; i++){
+      if(seed_index >= (run_params.hash_block_count)){
         std::cout << "ERROR : seed index exceeded!!!" << std::endl;
         exit(1);
       }
@@ -561,16 +591,9 @@ void runFSO(mxx::comm& comm,
   BL_BENCH_REPORT_MPI_NAMED(rfso, "rfso_app", comm);
 }
 
+template<typename RPM>
 int parse_args(int argc, char **argv,
-                mxx::comm& comm,
-                std::string& positionFile,
-                std::vector<std::string>& filenames,
-                std::string& candFile,
-                std::string& trueFile,
-                std::string& outPrefix,
-                unsigned& read_length,
-               uint32_t& minOverlap,
-               std::string& runType){
+               mxx::comm& comm, RPM& rparams){
   try { // try-catch block for commandline
 
     TCLAP::CmdLine cmd("Overlap Graph Construction", ' ', "0.1");
@@ -610,6 +633,11 @@ int parse_args(int argc, char **argv,
                                       "Block Size",
                                       false, 3, "int", cmd);
 
+    // max bucket size argument
+    TCLAP::ValueArg<int> maxBucketSizeArg("M", "max_bucket_size",
+                                          "Max Bucket Size",
+                                          false, -1, "int", cmd);
+
     // kmer length argument
     TCLAP::ValueArg<int> kmerLengthArg("k", "kmer_length",
                                        "Kmer Length",
@@ -635,65 +663,66 @@ int parse_args(int argc, char **argv,
     TCLAP::UnlabeledMultiArg<std::string> fileArg("filenames", "FASTA or FASTQ file names",
                                                   false, "string", cmd);
 
-
     // Parse the argv array.
     cmd.parse( argc, argv );
 
-    runType = runTypeArg.getValue();
-    positionFile = positionArg.getValue();
-    outPrefix = outputArg.getValue();
-    candFile = candFileArg.getValue();
-    trueFile = trueFileArg.getValue();
-    filenames = fileArg.getValue();
-    minOverlap = threshArg.getValue();
-    hash_block_count = blockCountArg.getValue();
-    hash_block_size = blockSizeArg.getValue();
-    kmer_length = kmerLengthArg.getValue();
-    read_length = readLengthArg.getValue();
+    rparams.runType = runTypeArg.getValue();
+    rparams.positionFile = positionArg.getValue();
+    rparams.outPrefix = outputArg.getValue();
+    rparams.candFile = candFileArg.getValue();
+    rparams.trueFile = trueFileArg.getValue();
+    rparams.filenames = fileArg.getValue();
+    rparams.minOverlap = threshArg.getValue();
+    run_params.hash_block_count = blockCountArg.getValue();
+    run_params.hash_block_size = blockSizeArg.getValue();
+    run_params.kmer_length = kmerLengthArg.getValue();
+    rparams.read_length = readLengthArg.getValue();
+    rparams.maxBucketSize = maxBucketSizeArg.getValue();
 
     if(comm.rank() == 0){
-      std::cout << "Run Type             : "  << runType << std::endl;
-      std::cout << "Position File        : " << positionFile << std::endl;
-      std::cout << "Output File Pfx      : " << outPrefix << std::endl;
-      std::cout << "Candidate Paris File : " << candFile << std::endl;
-      std::cout << "True Pairs File      : " << trueFile << std::endl;
-      std::cout << "No. Files            : " << filenames.size() << std::endl;
-      if(filenames.size() > 0){
+      std::cout << "Run Type             : " << rparams.runType << std::endl;
+      std::cout << "Position File        : " << rparams.positionFile << std::endl;
+      std::cout << "Output File Prefix   : " << rparams.outPrefix << std::endl;
+      std::cout << "Candidate Pairs File : " << rparams.candFile << std::endl;
+      std::cout << "True Pairs File      : " << rparams.trueFile << std::endl;
+      std::cout << "No. Files            : " << rparams.filenames.size() << std::endl;
+      if(rparams.filenames.size() > 0){
           std::cout << "Input File           : ";
-          for(auto& fx : filenames)
+          for(auto& fx : rparams.filenames)
               std::cout << "["<< fx << "] ";
           std::cout << std::endl;
       }
-      std::cout << "Overlap Min          : " << minOverlap << std::endl;
-      std::cout << "Block Size           : " << hash_block_size << std::endl;
-      std::cout << "Block Count          : " << hash_block_count << std::endl;
-      std::cout << "Kmer Length          : " << kmer_length  << std::endl;
-      std::cout << "Read Length          : " << read_length << std::endl;
+      std::cout << "Block Size           : " << run_params.hash_block_size << std::endl;
+      std::cout << "Block Count          : " << run_params.hash_block_count << std::endl;
+      std::cout << "Kmer Length          : " << run_params.kmer_length  << std::endl;
+      std::cout << "Read Length          : " << rparams.read_length << std::endl;
+      std::cout << "Min. Overlap         : " << rparams.minOverlap << std::endl;
+      std::cout << "Max. Bucket Size     : " << rparams.maxBucketSize << std::endl;
     }
   } catch (TCLAP::ArgException &e)  {
     std::cerr << "error: " << e.error() << " for arg " << e.argId() << std::endl;
     return 1;
   }
 
-  if(runType.length() == 0)
+  if(rparams.runType.length() == 0)
       return 1;
-  if(runType != "true" && runType != "candidate" && runType != "eval"){
+  if(rparams.runType != "true" && rparams.runType != "candidate" && rparams.runType != "eval"){
       return 1;
   }
-  if(runType == "candidate"){
-      if(kmer_length < min_kmer_length || kmer_length > max_kmer_length){
+  if(rparams.runType == "candidate"){
+      if(run_params.kmer_length < run_params.min_kmer_length || run_params.kmer_length > run_params.max_kmer_length){
           if(comm.rank() == 0)
               std::cout << "Kmer length should be in range ["
-                        << min_kmer_length << ", "
-                        << max_kmer_length << "]" << std::endl;
+                        << run_params.min_kmer_length << ", "
+                        << run_params.max_kmer_length << "]" << std::endl;
           return 1;
       }
-      if(hash_block_size < min_hash_block_size ||
-         hash_block_size > max_hash_block_size){
+      if(run_params.hash_block_size < run_params.min_hash_block_size ||
+         run_params.hash_block_size > run_params.max_hash_block_size){
           if(comm.rank() == 0)
               std::cout << "Hash block size should be in range ["
-                        << min_kmer_length << ", "
-                        << max_kmer_length << "]" << std::endl;
+                        << run_params.min_hash_block_size << ", "
+                        << run_params.max_hash_block_size << "]" << std::endl;
           return 1;
       }
   }
@@ -701,12 +730,7 @@ int parse_args(int argc, char **argv,
   return 0;
 }
 
-using RunPGFType = std::function< void(mxx::comm& comm,
-                                       std::string positionFile,
-                                       std::vector<std::string>& inFiles,
-                                       std::string outPrefix,
-                                       unsigned readLength,
-                                       uint32_t minOverlap) >;
+using RunPGFType = std::function< void(mxx::comm& comm) >;
 
 std::array<RunPGFType, 56> FSO_FN_ARRAY  = {
     runFSO<uint64_t, 8, 2>,
@@ -768,20 +792,17 @@ std::array<RunPGFType, 56> FSO_FN_ARRAY  = {
 };
 
 
-int genOlaps(mxx::comm& comm, std::string positionFile,
-             std::vector<std::string> filenames,
-             std::string outPrefix, unsigned readLength,
-             uint32_t threshold) {
+int genOlaps(mxx::comm& comm) {
 
-  hash_seeds_size = (hash_block_size * hash_block_count);
+  run_params.hash_seeds_size = (run_params.hash_block_size * run_params.hash_block_count);
   auto availableSeeds = sizeof(hash_seed_values);
   availableSeeds /= sizeof(hash_seed_values[0]);
   if(comm.rank() == 0)
        std::cout << "Available seeds : " << availableSeeds <<  std::endl;
-  if(availableSeeds < hash_seeds_size){
+  if(availableSeeds < run_params.hash_seeds_size){
       if(comm.rank() == 0)
           std::cout << "Not Enough seeds : " 
-                    << availableSeeds << " < " << hash_seeds_size
+                    << availableSeeds << " < " << run_params.hash_seeds_size
                     << std::endl;
       return 1;
   }
@@ -791,14 +812,14 @@ int genOlaps(mxx::comm& comm, std::string positionFile,
   auto start = std::chrono::steady_clock::now();
 
 
-  int aidx = (kmer_length - min_kmer_length) * (1 + max_hash_block_size - min_hash_block_size);
-  aidx += (hash_block_size - min_hash_block_size);
+  int aidx = (run_params.kmer_length - run_params.min_kmer_length) *
+      (1 + run_params.max_hash_block_size - run_params.min_hash_block_size);
+  aidx += (run_params.hash_block_size - run_params.min_hash_block_size);
   if(comm.rank() == 0)
       std::cout << "AIDX : " << aidx << std::endl;
 
   if(aidx > 0 && aidx < FSO_FN_ARRAY.size() && FSO_FN_ARRAY[aidx])
-      FSO_FN_ARRAY[aidx](comm, positionFile, filenames,
-                         outPrefix, readLength, threshold);
+      FSO_FN_ARRAY[aidx](comm);
 
   // runFSO<uint64_t, 21, 3>(comm, positionFile, filenames,
   //  outPrefix, readLength, threshold);
@@ -810,8 +831,8 @@ int genOlaps(mxx::comm& comm, std::string positionFile,
   auto end = std::chrono::steady_clock::now();
   auto elapsed_time  = std::chrono::duration<double, std::milli>(end - start).count();
 
-  auto atx = mxx::allreduce(total_blocks, comm);
-  auto ptx = mxx::allreduce(processed_blocks, comm);
+  auto atx = mxx::allreduce(run_params.total_blocks, comm);
+  auto ptx = mxx::allreduce(run_params.processed_blocks, comm);
   if(!comm.rank()){
     std::cout << "TOTAL BLOCKS : " << atx 
               << " : PROCESSED BLOCKS : " << ptx << std::endl;
@@ -824,9 +845,12 @@ int genOlaps(mxx::comm& comm, std::string positionFile,
   return 0;
 }
 
-int trueOlaps(mxx::comm& comm, std::string positionFile,
-              std::string outPrefix, unsigned readLength,
-              uint32_t minOverlap){
+int trueOlaps(mxx::comm& comm){
+
+    std::string positionFile = run_params.positionFile;
+    std::string outPrefix =  run_params.outPrefix;
+    unsigned readLength = run_params.read_length;
+    uint32_t minOverlap = run_params.minOverlap;
 
     // generate true pairs
     std::vector<std::pair<uint64_t, uint64_t>> truePairs;
@@ -848,9 +872,9 @@ int trueOlaps(mxx::comm& comm, std::string positionFile,
     return 0;
 }
 
-int evalOlaps(mxx::comm& comm, std::string candFile,
-              std::string trueFile){
-
+int evalOlaps(mxx::comm& comm) {
+    std::string candFile = run_params.candFile;
+    std::string trueFile = run_params.trueFile;
   comm.barrier();
   auto start = std::chrono::steady_clock::now();
 
@@ -928,37 +952,26 @@ int main(int argc, char** argv) {
     std::cout << "EXECUTABLE  : " << std::string(argv[0]) << std::endl;
 
 
-  std::string positionFile;
-  std::vector<std::string> filenames;
-  std::string outPrefix;
-  std::string candFile;
-  std::string trueFile;
-  uint32_t minOverlap;
-  unsigned readLength;
-  std::string rType;
-  outPrefix.assign("./output");
-  total_blocks = 0;
-  processed_blocks = 0;
+  run_params.outPrefix.assign("./output");
+  run_params.total_blocks = 0;
+  run_params.processed_blocks = 0;
   // parse arguments
-  if(parse_args(argc, argv, comm,
-                positionFile, filenames,
-                candFile, trueFile, outPrefix,
-                readLength,
-                minOverlap, rType) != 0)
+  if(parse_args(argc, argv, comm, run_params) != 0)
       return 1;
 
-  if(rType == "true"){
-      if(comm.rank() == 0)
+  if(run_params.runType == "true"){
+      if(comm.rank() == 0) {
           std::cout << "---- Generate True Overlaps ----" << std::endl;
-      return trueOlaps(comm, positionFile, outPrefix, readLength, minOverlap);
-  } else if(rType == "eval") {
+      }
+      return trueOlaps(comm);
+  } else if(run_params.runType == "eval") {
     if(comm.rank() == 0)
       std::cout << "---- Evaluate Overlaps ----" << std::endl;
-    return evalOlaps(comm, candFile, trueFile );
+    return evalOlaps(comm);
   } else {
     if(comm.rank() == 0)
       std::cout << "---- Generate candidate Overlaps ----" << std::endl;
-    return genOlaps(comm, positionFile, filenames, outPrefix, readLength, minOverlap);
+    return genOlaps(comm);
   }
   return 0;
 }
