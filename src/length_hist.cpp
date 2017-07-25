@@ -125,7 +125,7 @@ void generateSequenceLengths(mxx::comm& comm,
       parse_file_data<ReadLengthGeneratorType, FileParser,
                     SeqIterType>(file_data, local_pairs, comm);
 
-  BL_BENCH_COLLECTIVE_END(genpr, "compute_lengths", local_rhpairs.size(), comm);
+  BL_BENCH_COLLECTIVE_END(genpr, "compute_lengths", local_pairs.size(), comm);
 
   BL_BENCH_START(genpr);
 
@@ -146,7 +146,7 @@ void generateSequenceLengths(mxx::comm& comm,
                      cmp_fn, comm))
       mxx::sort(read_pairs.begin(), read_pairs.end(), cmp_fn, comm);
 
-  BL_BENCH_COLLECTIVE_END(genpr, "sort_full", local_rhpairs.size(), comm);
+  BL_BENCH_COLLECTIVE_END(genpr, "sort_full", read_pairs.size(), comm);
 
   // std::vector<T>(read_pairs).swap(read_pairs);
 }
@@ -163,7 +163,7 @@ void runFSO(mxx::comm& comm,
 
   BL_BENCH_START(rfso);
   load_file_data<KT>(comm, inFiles, file_data);
-  BL_BENCH_COLLECTIVE_END(rfso, "read_files", total, comm);
+  BL_BENCH_COLLECTIVE_END(rfso, "read_files", file_data.size(), comm);
 
   comm.barrier();
   auto start = std::chrono::steady_clock::now();

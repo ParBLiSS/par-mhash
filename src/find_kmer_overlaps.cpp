@@ -299,7 +299,7 @@ void runKSO(mxx::comm& comm,
     SeqPositionIndexType seqIdx(comm);
     constructIndex<SeqPositionIndexType>(comm, file_data.back(), seqIdx);
     //auto txval = std::distance(seqIdx.get_map().get_local_container().begin(), seqIdx.get_map().get_local_container().end());
-    BL_BENCH_COLLECTIVE_END(kfso, "build_index", read_pairs.size(), comm);
+    BL_BENCH_COLLECTIVE_END(kfso, "build_index", seqIdx.size(), comm);
     auto rval = mxx::allreduce(seqIdx.size(), comm);
     if(comm.rank() == 0)
         std::cout << "Index Size  : " << rval << std::endl;

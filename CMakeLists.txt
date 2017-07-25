@@ -35,7 +35,7 @@ else (MPI_FOUND)
   message(SEND_ERROR "This application cannot compile without MPI")
 endif (MPI_FOUND)
 
-OPTION(ENABLE_BENCHMARKING "Enable benchmarking." OFF)
+OPTION(ENABLE_BENCHMARKING "Enable benchmarking." ON)
 # set here since timer needs to have this defined allways.
 if (ENABLE_BENCHMARKING)
   SET(BL_BENCHMARK 1)

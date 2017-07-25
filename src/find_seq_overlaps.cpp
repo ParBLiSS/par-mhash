@@ -36,7 +36,7 @@ static struct RunArgs{
               max_hash_block_size(5),
               total_blocks(0),
               processed_blocks(0),
-              read_threshold(1000),
+              read_threshold(10),
               hash_block_size(2),
               hash_block_count(250),
               kmer_length(16),
@@ -482,7 +482,9 @@ void generateSequencePairs(mxx::comm& comm,
 
   BL_BENCH_START(genpr);
 
-  mxx::sort(local_rhpairs.begin(), local_rhpairs.end(),
+  comm.with_subset(
+      local_rhpairs.begin() != local_rhpairs.end(), [&](const mxx::comm& comm){
+        mxx::sort(local_rhpairs.begin(), local_rhpairs.end(),
             [&] (const RHBType& x, const RHBType& y){
                 for(auto i = 0; i < x.hash_values.size();i++){
                     if(x.hash_values[i] == y.hash_values[i]) continue;
@@ -492,6 +494,7 @@ void generateSequencePairs(mxx::comm& comm,
                 }
                 return false;
             }, comm);
+      });
   BL_BENCH_COLLECTIVE_END(genpr, "sort_records", local_rhpairs.size(), comm);
   // auto total_pairs = mxx::allreduce(local_rhpairs.size());
   // if(comm.rank()  == 0)
@@ -534,7 +537,7 @@ void runFSO(mxx::comm& comm){
 
   BL_BENCH_START(rfso);
   load_file_data<KT>(comm, inFiles, file_data);
-  BL_BENCH_COLLECTIVE_END(rfso, "read_files", total, comm);
+  BL_BENCH_COLLECTIVE_END(rfso, "read_files", file_data.size(), comm);
 
   comm.barrier();
   auto start = std::chrono::steady_clock::now();
