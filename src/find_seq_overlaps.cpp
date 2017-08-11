@@ -824,7 +824,6 @@ int genOlaps(mxx::comm& comm) {
                 << ((bool)FSO_FN_ARRAY[aidx]) << " " << std::endl;
   }
 
-
   if(aidx >= 0 && aidx < FSO_FN_ARRAY.size() && ((bool)FSO_FN_ARRAY[aidx]))
       FSO_FN_ARRAY[aidx](comm);
 
