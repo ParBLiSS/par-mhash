@@ -37,7 +37,7 @@ The name of the executable is ***find_seq_overlaps***. Input files are provided 
                         [--version] [-h] <file_names> ...
 
 
-Where: 
+   Where: 
 
    -R <string>,  --true_file <string>
      File with true pairs
