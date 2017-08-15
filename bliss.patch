@@ -1,0 +1,11 @@
+--- ./ext/bliss/src/utils/file_utils.hpp	2017-08-15 16:24:52.095760748 -0400
++++ ./ext/bliss/src/utils/file_utils_new.hpp	2017-08-15 16:27:58.789163446 -0400
+@@ -32,7 +32,7 @@
+ 
+     namespace file {
+ 
+-      std::string get_file_extension(std::string const & filename) {
++      static std::string get_file_extension(std::string const & filename) {
+         // find the last part.
+         size_t pos = filename.find_last_of('.');
+         if (pos == std::string::npos)  return std::string();
