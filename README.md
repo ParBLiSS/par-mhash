@@ -12,17 +12,35 @@ This sofware implements a parallel Locality-Sensitive Hashing based heuristic al
 
 ### Compilation ###
 
-bruno librares are included as a submodules. Initialize the submodules as below, if they are not already initialized.
+bruno/bliss librares are included as a submodules under the directory ext/bliss. Initialize the submodules as below, if they are not already initialized.
 
     git submodule init
     git submodule update
 
-Next, create a build directory outside of source directory. For example,
+bruno/bliss also depends upon  mxx and google sparse hash, we initialize them as follows
+
+    cd ext/bliss
+    git submodule init
+    git submodule update
+    cd ../../
+
+We also need to compile google's sparshash.
+
+    cd ext/bliss/ext/sparshash
+    ./configure
+    make
+    cd ../../../../
+
+A bug in bruno is causes a error for compilation. So, we apply a patch on bruno/bliss as follows
+
+    patch -p0 < bliss.patch
+
+Now, we are read to build the executable. First, create a build directory outside of source directory. For example,
 
      mkdir build
      cd build
 
-Finally, build the executable.
+Finally, build the executable ***find_seq_overlaps***.
 
      cmake ../
      make

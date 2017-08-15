@@ -1,7 +1,6 @@
 [submodule "ext/bliss"]
 	path = ext/bliss
-	url = https://srirampc@bitbucket.org/tcpan/bliss.git
-	branch = debruijn
+	url = https://github.com/ParBLiSS/bruno.git 
 [submodule "ext/mxx"]
 	path = ext/mxx
 	url = https://github.com/patflick/mxx.git
