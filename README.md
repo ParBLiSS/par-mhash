@@ -39,50 +39,50 @@ The name of the executable is ***find_seq_overlaps***. Input files are provided 
 
    Where: 
 
-   -R <string>,  --true_file <string>
-     File with true pairs
+    -R <string>,  --true_file <string>
+      File with true pairs
 
-   -C <string>,  --candidate_file <string>
-     File with candidate pairs
+    -C <string>,  --candidate_file <string>
+      File with candidate pairs
 
-   -r <unsigned>,  --read_length <unsigned>
-     read length
+    -r <unsigned>,  --read_length <unsigned>
+      read length
 
-   -k <int>,  --kmer_length <int>
-     Kmer Length
+    -k <int>,  --kmer_length <int>
+      Kmer Length
 
-   -M <int>,  --max_bucket_size <int>
-     Max Bucket Size
+    -M <int>,  --max_bucket_size <int>
+      Max Bucket Size
 
-   -T <int>,  --block_size <int>
-     Block Size
+    -T <int>,  --block_size <int>
+      Block Size
 
-   -B <int>,  --block_count <int>
-     Number of blocks
+    -B <int>,  --block_count <int>
+      Number of blocks
 
-   -d <int>,  --overlap_threshold <int>
-     Minimum Overlap
+    -d <int>,  --overlap_threshold <int>
+      Minimum Overlap
 
-   -O <string>,  --output_prefix <string>
-     Prefix for output files, including directory
+    -O <string>,  --output_prefix <string>
+      Prefix for output files, including directory
 
-   -p <string>,  --position_file <string>
-     Position for input file (full path)
+    -p <string>,  --position_file <string>
+      Position for input file (full path)
 
-   -t <string>,  --run_type <string>
-     (required)  Type of run : One of 'candidate', 'true', 'eval' 
+    -t <string>,  --run_type <string>
+      (required)  Type of run : One of 'candidate', 'true', 'eval' 
 
-   --,  --ignore_rest
-     Ignores the rest of the labeled arguments following this flag.
+    --,  --ignore_rest
+      Ignores the rest of the labeled arguments following this flag.
 
-   --version
-     Displays version information and exits.
+    --version
+      Displays version information and exits.
 
-   -h,  --help
-     Displays usage information and exits.
+    -h,  --help
+      Displays usage information and exits.
 
-   <string>  (accepted multiple times)
-     FASTA or FASTQ file names
+    <string>  (accepted multiple times)
+      FASTA or FASTQ file names
 
 
 
