@@ -7,7 +7,7 @@ This sofware implements a parallel Locality-Sensitive Hashing based heuristic al
 * A modern, C++11 ready compiler such as `g++` version 4.7 or higher or `clang` version 3.2 or higher.
 * The [cmake](www.cmake.org) build system (Version >= 2.8.11).
 * A 64-bit Linux system.
-* An MPI implementation. Tested with OpenMPI and MPICH.
+* An MPI implementation. Tested with OpenMPI and MPICH only.
 
 
 ### Compilation ###
@@ -24,23 +24,23 @@ bruno/bliss also depends upon  mxx and google sparse hash, we initialize them as
     git submodule update
     cd ../../
 
-We also need to compile google's sparshash.
+A bug in bruno is causes a error for compilation. So, we apply a patch on bruno/bliss as follows
+
+    patch -p0 < bliss.patch
+
+Now, we are read to build the executable. First, compile google's sparshash so that the header files are configured properly.
 
     cd ext/bliss/ext/sparshash
     ./configure
     make
     cd ../../../../
 
-A bug in bruno is causes a error for compilation. So, we apply a patch on bruno/bliss as follows
-
-    patch -p0 < bliss.patch
-
-Now, we are read to build the executable. First, create a build directory outside of source directory. For example,
+Next, create a build directory outside of the source directory. For example,
 
      mkdir build
      cd build
 
-Finally, build the executable ***find_seq_overlaps***.
+Finally, build the executable ***find_seq_overlaps*** as follows.
 
      cmake ../
      make
